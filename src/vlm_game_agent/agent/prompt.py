@@ -36,7 +36,11 @@ COMPUTER_USE_SCHEMA = {
                         "* `triple_click`: Triple-click at (x, y).\n"
                         "* `scroll`: Scroll mouse wheel (positive=up, negative=down).\n"
                         "* `hscroll`: Horizontal scroll.\n"
-                        "* `wait`: Wait specified seconds.\n"
+                        "* `wait`: Wait specified seconds. IMPORTANT — use this when:\n"
+                "  - You just clicked a button and expect a menu/popup to appear.\n"
+                "  - You see a loading screen, black screen, or transition animation.\n"
+                "  - The game state is changing and you need to wait before the next screenshot.\n"
+                "  - After terminating, wait a moment to ensure the game finishes processing.\n"
                         "* `terminate`: End task with status.\n"
                         "* `answer`: Answer a question."
                     ),
@@ -100,6 +104,7 @@ def build_system_prompt(screen_width: int, screen_height: int, memory_text: str 
 - You will be provided with screenshots of the target window.
 - Before each action, pause and think about what you see in the screenshot.
 - If an action does not produce the expected result, try a different approach.
+- When you see a loading screen, black screen, or the game is clearly in transition, DO NOT terminate or take another action immediately. Call `wait` first (e.g. 2-3 seconds) and let the next screenshot show the updated state.
 
 ## Tools
 

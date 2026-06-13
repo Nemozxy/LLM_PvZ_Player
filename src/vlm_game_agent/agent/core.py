@@ -38,6 +38,7 @@ class GameAgent:
         max_history_turns: int = 6,
         pause_before_think: bool = True,
         stop_hotkey: keyboard.Key = keyboard.Key.f12,
+        action_delay: float = 1.0,
     ) -> None:
         """初始化 Agent.
 
@@ -50,6 +51,7 @@ class GameAgent:
             max_history_turns: 保留的最大历史对话轮数。
             pause_before_think: 是否在 VLM 推理前暂停游戏。
             stop_hotkey: 全局停止热键，默认 F12。
+            action_delay: 每轮动作执行后的最小等待时间（秒），给游戏响应留出时间。
         """
         self.capture = capture
         self.pause = pause
@@ -59,6 +61,7 @@ class GameAgent:
         self.max_history_turns = max_history_turns
         self.pause_before_think = pause_before_think
         self.stop_hotkey = stop_hotkey
+        self.action_delay = action_delay
 
         self._executor: ActionExecutor | None = None
         self._history: list[dict[str, Any]] = []
@@ -135,7 +138,7 @@ class GameAgent:
                 raw_output, reasoning = self.vlm.chat(messages)
                 if reasoning:
                     logger.info("[Agent] VLM 思维链:\n{}", reasoning)
-                    self._notify_webui("log", f"[思考] {reasoning[:300]}", "debug")
+                    self._notify_webui("log", f"[思考] {reasoning}", "debug")
                 logger.info("[Agent] VLM 输出:\n{}", raw_output)
                 self._notify_webui("log", f"VLM: {raw_output[:200]}", "info")
             except Exception as exc:
@@ -192,11 +195,12 @@ class GameAgent:
                 # 连续动作之间留小间隔，让游戏响应
                 time.sleep(0.15)
 
-            # 9. 等待画面变化
-            wait_time = 0.5
+            # 9. 等待画面变化（基础延迟 + 模型主动 wait 取最大值）
+            wait_time = self.action_delay
             for tc in tool_calls:
                 if tc.arguments.get("action") == "wait":
                     wait_time = max(wait_time, tc.arguments.get("time", 0.5))
+            logger.debug("[Agent] 等待 {} 秒", wait_time)
             time.sleep(wait_time)
 
         logger.info("[Agent] 任务结束")
