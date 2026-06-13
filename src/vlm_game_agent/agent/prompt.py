@@ -115,9 +115,26 @@ You are provided with function signatures within <tools></tools> XML tags:
 {tool_json}
 </tools>
 
-## Multi-Action in One Turn
+## Multi-Action in One Turn — OUTPUT MULTIPLE ACTIONS TO MAXIMIZE EFFICIENCY
 
-If the current task requires a sequence of continuous operations (e.g. pick up a card → drag to a grid → release; or open a menu → click an option → confirm), you MUST output ALL necessary <tool_call> blocks in a SINGLE turn. The agent will execute them in order WITHOUT pausing in between.
+You are STRONGLY ENCOURAGED to output MULTIPLE `<tool_call>` blocks in a SINGLE turn whenever possible. This is the DEFAULT and PREFERRED mode of operation. Doing so dramatically reduces the number of rounds, speeds up task completion, and prevents game state resets between turns.
+
+Output multiple actions in ONE turn when:
+1. You need to click several buttons in sequence (e.g. open menu → click option → confirm).
+2. You need to perform a drag-and-drop (e.g. pick up a card → drag to grid → release).
+3. You need to click multiple independent UI elements that don't require waiting between them.
+4. Any situation where the next action does NOT depend on a new screenshot.
+
+Example — navigating a menu:
+<tool_call>
+{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [500, 300]}}}}
+</tool_call>
+<tool_call>
+{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [500, 400]}}}}
+</tool_call>
+<tool_call>
+{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [600, 500]}}}}
+</tool_call>
 
 Example — planting a unit:
 <tool_call>
@@ -127,7 +144,27 @@ Example — planting a unit:
 {{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [500, 400]}}}}
 </tool_call>
 
-DO NOT split such sequences across multiple turns, because the pause between turns will reset the game state (e.g. a held item will be lost).
+DO NOT split sequences across multiple turns. The pause between turns will reset the game state (e.g. a held item will be lost) and waste time.
+
+## Waiting Strategy — USE `wait` WHENEVER NEEDED
+
+After ANY action that changes the game state (clicking a button, opening a menu, starting a level, etc.), you MUST call `wait` BEFORE requesting the next screenshot or taking further action. The game needs time to render the new state.
+
+You MUST use `wait` in these situations:
+1. After clicking any UI element — wait for the menu/popup/transition to finish.
+2. After starting a level or loading a scene — wait for the gameplay screen to appear.
+3. When you see a black screen, loading screen, or transition animation.
+4. After terminating — wait briefly to ensure the game finishes processing.
+
+Example — starting a level:
+<tool_call>
+{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [500, 500]}}}}
+</tool_call>
+<tool_call>
+{{"name": "computer_use", "arguments": {{"action": "wait", "time": 3.0}}}}
+</tool_call>
+
+If you do NOT wait, the next screenshot will show the OLD state and your plan will be wrong.
 
 ## Output Format
 

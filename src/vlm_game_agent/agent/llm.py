@@ -21,8 +21,8 @@ class VLMClient:
         base_url: str = "http://127.0.0.1:1234/v1",
         model: str = "qwen3.6-35b-a3b-apex",
         api_key: str = "sk-no-key-required",
-        max_tokens: int = 4096,
-        temperature: float = 0.3,
+        max_tokens: int = 8192,
+        temperature: float = 0.4,
         retries: int = 3,
         retry_delay: float = 2.0,
     ) -> None:
