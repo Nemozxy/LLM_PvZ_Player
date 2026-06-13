@@ -42,6 +42,8 @@ class CaptureConfig:
     capture_mode: str = "screen"
     # 激活窗口后的等待时间（秒），给游戏重绘留出时间
     activate_delay: float = 0.15
+    # 截图范围: "window" 完整窗口外框(含标题栏边框，可能有毛边); "client" 仅客户区(纯内容)
+    capture_area: str = "client"
 
 
 class WindowCapture:
@@ -320,9 +322,24 @@ class WindowCapture:
     # ------------------------------------------------------------------ #
     @property
     def _window_box(self) -> tuple[int, int, int, int]:
-        """返回窗口当前 (left, top, right, bottom) 绝对坐标."""
+        """返回窗口当前 (left, top, right, bottom) 绝对坐标.
+
+        根据 capture_area 配置决定截取范围：
+        - "window": 完整外框（含标题栏、边框），可能有桌面毛边
+        - "client": 仅客户区（纯内容区域），Windows 下通过 ClientToScreen 计算
+        """
         if self._window is None:
             raise RuntimeError("窗口未初始化")
+
+        if self.config.capture_area == "client" and sys.platform == "win32":
+            hwnd = self._window._hWnd
+            # 客户区左上角映射到屏幕坐标
+            cx, cy = win32gui.ClientToScreen(hwnd, (0, 0))
+            # 客户区大小
+            _, _, cw, ch = win32gui.GetClientRect(hwnd)
+            return (cx, cy, cx + cw, cy + ch)
+
+        # 默认/非 Windows: 使用外框
         return (
             self._window.left,
             self._window.top,
