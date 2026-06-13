@@ -171,7 +171,7 @@ class WindowCapture:
 
         # 绕过 Windows 前台限制：AttachThreadInput
         current_thread = win32api.GetCurrentThreadId()
-        target_thread = win32gui.GetWindowThreadProcessId(hwnd)[0]
+        target_thread, _ = win32process.GetWindowThreadProcessId(hwnd)
 
         try:
             if current_thread != target_thread:
