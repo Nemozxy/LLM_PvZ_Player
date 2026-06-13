@@ -189,6 +189,9 @@ class GameAgent:
                 self._push_history_user_text(feedback)
                 logger.debug("[Agent] {}", feedback)
 
+                # 连续动作之间留小间隔，让游戏响应
+                time.sleep(0.15)
+
             # 9. 等待画面变化
             wait_time = 0.5
             for tc in tool_calls:

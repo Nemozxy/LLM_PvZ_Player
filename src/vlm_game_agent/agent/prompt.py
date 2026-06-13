@@ -110,6 +110,20 @@ You are provided with function signatures within <tools></tools> XML tags:
 {tool_json}
 </tools>
 
+## Multi-Action in One Turn
+
+If the current task requires a sequence of continuous operations (e.g. pick up a card → drag to a grid → release; or open a menu → click an option → confirm), you MUST output ALL necessary <tool_call> blocks in a SINGLE turn. The agent will execute them in order WITHOUT pausing in between.
+
+Example — planting a unit:
+<tool_call>
+{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [200, 800]}}}}
+</tool_call>
+<tool_call>
+{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [500, 400]}}}}
+</tool_call>
+
+DO NOT split such sequences across multiple turns, because the pause between turns will reset the game state (e.g. a held item will be lost).
+
 ## Output Format
 
 For each function call, return a JSON object with function name and arguments within <tool_call></tool_call> XML tags:
@@ -117,7 +131,7 @@ For each function call, return a JSON object with function name and arguments wi
 {{"name": "computer_use", "arguments": {{"action": "...", ...}}}}
 </tool_call>
 
-You must ONLY output the <tool_call> block. Do not include any other text outside the block.
+You must ONLY output the <tool_call> block(s). Do not include any other text outside the block.
 """
 
     if memory_text.strip():
