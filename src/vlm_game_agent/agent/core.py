@@ -137,7 +137,7 @@ class GameAgent:
             try:
                 raw_output, reasoning = self.vlm.chat(messages)
                 if reasoning:
-                    logger.info("[Agent] VLM 思维链:\n{}", reasoning)
+                    logger.debug("[Agent] VLM 思维链:\n{}", reasoning)
                     self._notify_webui("log", f"[思考] {reasoning}", "debug")
                 logger.info("[Agent] VLM 输出:\n{}", raw_output)
                 self._notify_webui("log", f"VLM: {raw_output[:200]}", "info")
