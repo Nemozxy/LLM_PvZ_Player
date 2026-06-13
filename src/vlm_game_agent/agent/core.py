@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from typing import Any
 
 from loguru import logger
+from pynput import keyboard
 
 from vlm_game_agent.pause import PauseController
 from vlm_game_agent.vision import WindowCapture
@@ -35,6 +37,7 @@ class GameAgent:
         webui: ConnectionManager | None = None,
         max_history_turns: int = 6,
         pause_before_think: bool = True,
+        stop_hotkey: keyboard.Key = keyboard.Key.f12,
     ) -> None:
         """初始化 Agent.
 
@@ -46,6 +49,7 @@ class GameAgent:
             webui: WebUI 连接管理器（可选）。
             max_history_turns: 保留的最大历史对话轮数。
             pause_before_think: 是否在 VLM 推理前暂停游戏。
+            stop_hotkey: 全局停止热键，默认 F12。
         """
         self.capture = capture
         self.pause = pause
@@ -54,10 +58,12 @@ class GameAgent:
         self.webui = webui
         self.max_history_turns = max_history_turns
         self.pause_before_think = pause_before_think
+        self.stop_hotkey = stop_hotkey
 
         self._executor: ActionExecutor | None = None
         self._history: list[dict[str, Any]] = []
         self._running = False
+        self._stop_listener: keyboard.Listener | None = None
 
     # ------------------------------------------------------------------ #
     #  主循环
@@ -71,6 +77,10 @@ class GameAgent:
         self._running = True
         logger.info("[Agent] 任务启动: {}", task)
         self._notify_webui("log", f"任务启动: {task}", "info")
+
+        # 启动全局停止热键监听（后台线程）
+        self._start_stop_listener()
+        logger.info("[Agent] 按 {} 可随时停止 Agent", self.stop_hotkey)
 
         # 初始化执行器
         self._executor = ActionExecutor(
@@ -122,9 +132,12 @@ class GameAgent:
 
             # 5. VLM 推理
             try:
-                raw_output = self.vlm.chat(messages)
+                raw_output, reasoning = self.vlm.chat(messages)
+                if reasoning:
+                    logger.info("[Agent] VLM 思维链:\n{}", reasoning)
+                    self._notify_webui("log", f"[思考] {reasoning[:300]}", "debug")
                 logger.info("[Agent] VLM 输出:\n{}", raw_output)
-                self._notify_webui("log", f"VLM: {raw_output[:200]}", "debug")
+                self._notify_webui("log", f"VLM: {raw_output[:200]}", "info")
             except Exception as exc:
                 logger.error("[Agent] VLM 调用失败: {}", exc)
                 self._notify_webui("log", f"VLM 失败: {exc}", "error")
@@ -185,11 +198,40 @@ class GameAgent:
 
         logger.info("[Agent] 任务结束")
         self._notify_webui("log", "任务结束", "info")
+        self._cleanup_stop_listener()
 
     def stop(self) -> None:
-        """停止 Agent 主循环."""
+        """停止 Agent 主循环（全局热键触发时调用）."""
+        if not self._running:
+            return
         self._running = False
-        logger.info("[Agent] 收到停止信号")
+        logger.info("[Agent] 收到停止信号，正在恢复游戏...")
+        # 如果当前处于暂停状态，强制恢复，避免窗口被冻结
+        try:
+            if self.pause.is_paused():
+                self.pause.resume()
+        except Exception as exc:
+            logger.warning("[Agent] 恢复游戏失败: {}", exc)
+        self._cleanup_stop_listener()
+
+    def _start_stop_listener(self) -> None:
+        """在后台线程启动全局热键监听."""
+        def on_press(key: keyboard.Key) -> bool | None:
+            if key == self.stop_hotkey:
+                logger.info("[Agent] 检测到停止热键 {}，正在停止...", key)
+                self.stop()
+                return False  # 停止监听器
+            return None
+
+        self._stop_listener = keyboard.Listener(on_press=on_press)
+        self._stop_listener.daemon = True
+        self._stop_listener.start()
+
+    def _cleanup_stop_listener(self) -> None:
+        """清理热键监听器."""
+        if self._stop_listener and self._stop_listener.is_alive():
+            self._stop_listener.stop()
+            self._stop_listener = None
 
     # ------------------------------------------------------------------ #
     #  消息历史管理
@@ -265,12 +307,14 @@ class GameAgent:
                     messages.append({"role": msg["role"], "content": "\n".join(texts)})
 
         # 最新截图作为最后一条 user 消息（数组 content，只有这里放图片）
+        fmt = self.capture.config.output_format.lower() if self.capture else "png"
+        mime = f"image/{fmt}"
         messages.append({
             "role": "user",
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                    "image_url": {"url": f"data:{mime};base64,{img_b64}"},
                 },
                 {"type": "text", "text": "请根据当前截图，输出下一步操作。"},
             ],
