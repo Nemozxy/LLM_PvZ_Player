@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VLM Game Agent - 远程监看</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #app { display: flex; height: 100vh; }
+
+    /* 左侧：画面 */
+    .panel-left {
+      flex: 2;
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      border-right: 1px solid #333;
+      min-width: 0;
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 14px;
+      color: #888;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #555;
+    }
+    .status-dot.online { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+    .status-dot.offline { background: #f44336; box-shadow: 0 0 6px #f44336; }
+    .frame-container {
+      flex: 1;
+      background: #1a1a1a;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border: 1px solid #333;
+    }
+    .frame-container img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .frame-placeholder {
+      color: #555;
+      font-size: 16px;
+    }
+
+    /* 右侧：日志 + 输入 */
+    .panel-right {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      min-width: 300px;
+      max-width: 450px;
+    }
+    .log-container {
+      flex: 1;
+      background: #1a1a1a;
+      border-radius: 8px;
+      border: 1px solid #333;
+      overflow-y: auto;
+      padding: 10px;
+      margin-bottom: 10px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .log-entry {
+      margin-bottom: 6px;
+      word-break: break-word;
+    }
+    .log-entry.info { color: #ccc; }
+    .log-entry.debug { color: #888; }
+    .log-entry.warning { color: #ff9800; }
+    .log-entry.error { color: #f44336; }
+    .log-entry.user { color: #2196f3; font-weight: bold; }
+    .log-entry.action { color: #9c27b0; }
+    .log-time {
+      color: #666;
+      margin-right: 6px;
+      font-size: 11px;
+    }
+
+    .input-area {
+      display: flex;
+      gap: 8px;
+    }
+    .input-area input {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #222;
+      color: #e0e0e0;
+      font-size: 14px;
+      outline: none;
+    }
+    .input-area input:focus { border-color: #4caf50; }
+    .input-area button {
+      padding: 10px 18px;
+      border-radius: 6px;
+      border: none;
+      background: #4caf50;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .input-area button:hover { background: #45a049; }
+    .input-area button:disabled { background: #555; cursor: not-allowed; }
+
+    .stats {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: #777;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="panel-left">
+      <div class="panel-header">
+        <span>实时画面</span>
+        <div class="status">
+          <span>WebSocket</span>
+          <div class="status-dot" :class="wsConnected ? 'online' : 'offline'"></div>
+          <span>{{ wsConnected ? '在线' : '离线' }}</span>
+        </div>
+      </div>
+      <div class="stats">
+        <span>FPS: {{ fps }}</span>
+        <span>画面尺寸: {{ frameSize }}</span>
+        <span>日志: {{ logs.length }} 条</span>
+      </div>
+      <div class="frame-container">
+        <img v-if="frameSrc" :src="frameSrc" alt="实时画面">
+        <div v-else class="frame-placeholder">等待画面推送...</div>
+      </div>
+    </div>
+
+    <div class="panel-right">
+      <div class="panel-header">
+        <span>Agent 日志 / 思考流</span>
+      </div>
+      <div class="log-container" ref="logBox">
+        <div
+          v-for="(log, idx) in logs"
+          :key="idx"
+          class="log-entry"
+          :class="log.level"
+        >
+          <span class="log-time">{{ log.time }}</span>
+          <span>{{ log.text }}</span>
+        </div>
+      </div>
+      <div class="input-area">
+        <input
+          v-model="commandText"
+          placeholder="输入指令发给 Agent..."
+          @keyup.enter="sendCommand"
+          :disabled="!wsConnected"
+        >
+        <button @click="sendCommand" :disabled="!wsConnected || !commandText.trim()">
+          发送
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp } = Vue;
+
+    createApp({
+      data() {
+        return {
+          ws: null,
+          wsConnected: false,
+          frameSrc: '',
+          frameSize: '-',
+          logs: [],
+          commandText: '',
+          fps: 0,
+          lastFrameTime: 0,
+          frameCount: 0,
+        };
+      },
+      mounted() {
+        this.connectWebSocket();
+        // 计算 FPS
+        setInterval(() => {
+          this.fps = this.frameCount;
+          this.frameCount = 0;
+        }, 1000);
+      },
+      methods: {
+        connectWebSocket() {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const wsUrl = `${protocol}//${window.location.host}/ws`;
+          this.ws = new WebSocket(wsUrl);
+
+          this.ws.onopen = () => {
+            this.wsConnected = true;
+            this.addLog('系统', 'WebSocket 已连接', 'info');
+          };
+
+          this.ws.onmessage = (event) => {
+            try {
+              const msg = JSON.parse(event.data);
+              this.handleMessage(msg);
+            } catch (e) {
+              console.error('消息解析失败:', event.data);
+            }
+          };
+
+          this.ws.onclose = () => {
+            this.wsConnected = false;
+            this.addLog('系统', 'WebSocket 已断开，3秒后重连...', 'warning');
+            setTimeout(() => this.connectWebSocket(), 3000);
+          };
+
+          this.ws.onerror = (err) => {
+            console.error('WebSocket 错误:', err);
+          };
+        },
+
+        handleMessage(msg) {
+          if (msg.type === 'frame') {
+            this.frameSrc = 'data:image/jpeg;base64,' + msg.data;
+            this.frameCount++;
+            // 简单估算尺寸
+            const sizeBytes = Math.round(msg.data.length * 0.75);
+            this.frameSize = sizeBytes > 1024
+              ? (sizeBytes / 1024).toFixed(1) + ' KB'
+              : sizeBytes + ' B';
+          } else if (msg.type === 'log') {
+            this.addLog('', msg.text, msg.level || 'info');
+          } else if (msg.type === 'action') {
+            this.addLog('动作', `${msg.action}: ${msg.detail}`, 'action');
+          } else if (msg.type === 'pong') {
+            // 心跳回应
+          }
+        },
+
+        addLog(tag, text, level) {
+          const now = new Date();
+          const time = now.toLocaleTimeString('zh-CN', { hour12: false });
+          const display = tag ? `[${tag}] ${text}` : text;
+          this.logs.push({ time, text: display, level });
+          // 限制日志条数，防止内存泄漏
+          if (this.logs.length > 500) {
+            this.logs = this.logs.slice(-300);
+          }
+          // 自动滚动到底部
+          this.$nextTick(() => {
+            const box = this.$refs.logBox;
+            if (box) box.scrollTop = box.scrollHeight;
+          });
+        },
+
+        sendCommand() {
+          const text = this.commandText.trim();
+          if (!text || !this.wsConnected) return;
+          this.ws.send(JSON.stringify({ type: 'command', text }));
+          this.commandText = '';
+        },
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>
