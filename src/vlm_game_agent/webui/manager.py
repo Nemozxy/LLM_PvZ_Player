@@ -19,6 +19,7 @@ class ConnectionManager:
     def __init__(self) -> None:
         self._clients: set[WebSocket] = set()
         self._user_commands: asyncio.Queue[str] = asyncio.Queue()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # ------------------------------------------------------------------ #
     #  连接生命周期
@@ -26,6 +27,8 @@ class ConnectionManager:
     async def connect(self, ws: WebSocket) -> None:
         await ws.accept()
         self._clients.add(ws)
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
         logger.info("[WebUI] 客户端已连接，当前在线: {}", len(self._clients))
 
     def disconnect(self, ws: WebSocket) -> None:

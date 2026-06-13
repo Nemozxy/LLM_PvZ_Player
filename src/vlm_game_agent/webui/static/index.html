@@ -247,7 +247,10 @@
 
         handleMessage(msg) {
           if (msg.type === 'frame') {
-            this.frameSrc = 'data:image/jpeg;base64,' + msg.data;
+            const mime = msg.data.startsWith('/9j/') ? 'image/jpeg'
+                       : msg.data.startsWith('iVBOR') ? 'image/png'
+                       : 'image/png';
+            this.frameSrc = 'data:' + mime + ';base64,' + msg.data;
             this.frameCount++;
             // 简单估算尺寸
             const sizeBytes = Math.round(msg.data.length * 0.75);

@@ -329,19 +329,18 @@ class GameAgent:
     # ------------------------------------------------------------------ #
     def _notify_webui(self, msg_type: str, data: str, detail: str = "") -> None:
         """向 WebUI 推送消息（非阻塞）."""
-        if self.webui is None:
+        if self.webui is None or self.webui._loop is None:
             return
+        loop = self.webui._loop
         if msg_type == "frame":
-            asyncio.run_coroutine_threadsafe(
-                self.webui.push_frame(data), asyncio.get_event_loop()
-            )
+            asyncio.run_coroutine_threadsafe(self.webui.push_frame(data), loop)
         elif msg_type == "log":
             asyncio.run_coroutine_threadsafe(
-                self.webui.push_log(data, detail or "info"), asyncio.get_event_loop()
+                self.webui.push_log(data, detail or "info"), loop
             )
         elif msg_type == "action":
             asyncio.run_coroutine_threadsafe(
-                self.webui.push_action(data, detail), asyncio.get_event_loop()
+                self.webui.push_action(data, detail), loop
             )
 
     def _fetch_user_command(self) -> str | None:
