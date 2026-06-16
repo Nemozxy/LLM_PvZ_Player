@@ -349,9 +349,16 @@ class WindowCapture:
 
     @property
     def window_size(self) -> tuple[int, int]:
-        """返回窗口当前尺寸 (width, height)."""
+        """返回与截图范围一致的尺寸 (width, height).
+
+        根据 capture_area 配置返回对应区域的尺寸，
+        确保与实际截图像素一一对应，避免坐标映射偏移。
+        """
         if self._window is None:
             raise RuntimeError("窗口未初始化")
+        if self.config.capture_area == "client" and sys.platform == "win32":
+            box = self._window_box  # 已是客户区坐标
+            return (box[2] - box[0], box[3] - box[1])
         return (self._window.width, self._window.height)
 
     def close(self) -> None:
