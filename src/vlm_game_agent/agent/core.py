@@ -90,6 +90,7 @@ class GameAgent:
         self._history: list[dict[str, Any]] = []
         self._running = False
         self._stop_listener: keyboard.Listener | None = None
+        self._last_turn_time: float = 0.0  # 上一轮结束的时间戳
 
     # ------------------------------------------------------------------ #
     #  主循环
@@ -118,11 +119,13 @@ class GameAgent:
 
         # 构建系统提示（LM Studio 兼容：content 用字符串而非数组）
         w, h = self.capture.window_size
-        system_prompt = build_system_prompt(w, h, memory_text)
+        window_title = self.capture._window_title if self.capture._window else ""
+        system_prompt = build_system_prompt(w, h, memory_text, window_title)
         self._history = [{"role": "system", "content": system_prompt}]
 
         # 首轮用户消息：截图 + 任务
         self._push_user_frame(task)
+        self._last_turn_time = time.perf_counter()
 
         turn = 0
         while self._running:
@@ -222,6 +225,9 @@ class GameAgent:
             wait_time = self._compute_wait_time(tool_calls)
             logger.debug("[Agent] 等待 {} 秒", wait_time)
             time.sleep(wait_time)
+
+            # 记录本轮结束时间，供下轮计算间隔
+            self._last_turn_time = time.perf_counter()
 
         logger.info("[Agent] 任务结束")
         self._notify_webui("log", "任务结束", "info")
@@ -336,6 +342,12 @@ class GameAgent:
         # 最新截图作为最后一条 user 消息（数组 content，只有这里放图片）
         fmt = self.capture.config.output_format.lower() if self.capture else "png"
         mime = f"image/{fmt}"
+
+        # 注入时间信息，帮助模型理解游戏节奏
+        now = time.perf_counter()
+        elapsed = now - self._last_turn_time
+        time_hint = f"[当前截图，距上一轮 {elapsed:.1f} 秒]"
+
         messages.append({
             "role": "user",
             "content": [
@@ -343,7 +355,7 @@ class GameAgent:
                     "type": "image_url",
                     "image_url": {"url": f"data:{mime};base64,{img_b64}"},
                 },
-                {"type": "text", "text": "请根据当前截图，输出下一步操作。"},
+                {"type": "text", "text": f"{time_hint}\n请根据当前截图，输出下一步操作。"},
             ],
         })
         return messages
