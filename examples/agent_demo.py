@@ -10,23 +10,52 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import uvicorn
 from loguru import logger
+from pynput import keyboard
 
 from vlm_game_agent.agent import GameAgent
 from vlm_game_agent.agent.llm import VLMClient
 from vlm_game_agent.agent.memory import MemoryManager
+from vlm_game_agent.config.settings import Settings
 from vlm_game_agent.pause import PauseController
 from vlm_game_agent.vision import CaptureConfig, WindowCapture
 from vlm_game_agent.webui.server import WebUIServer
 
 
+def parse_stop_hotkey(key_str: str) -> keyboard.Key:
+    """解析停止热键字符串."""
+    key_map = {
+        "f1": keyboard.Key.f1, "f2": keyboard.Key.f2, "f3": keyboard.Key.f3,
+        "f4": keyboard.Key.f4, "f5": keyboard.Key.f5, "f6": keyboard.Key.f6,
+        "f7": keyboard.Key.f7, "f8": keyboard.Key.f8, "f9": keyboard.Key.f9,
+        "f10": keyboard.Key.f10, "f11": keyboard.Key.f11, "f12": keyboard.Key.f12,
+        "esc": keyboard.Key.esc, "pause": keyboard.Key.pause,
+        "space": keyboard.Key.space, "enter": keyboard.Key.enter,
+    }
+    return key_map.get(key_str.lower(), keyboard.Key.f12)
+
+
+def setup_pause_controller(pause: PauseController, strategy: str) -> None:
+    """根据配置设置暂停策略."""
+    if strategy == "soft":
+        pause.set_soft()
+    elif strategy == "hard":
+        pause.set_hard()
+    elif strategy == "focus":
+        pause.set_focus()
+    else:
+        pause.set_hard()
+
+
 async def main() -> None:
+    settings = Settings()
+
     # 1. 截图器
     cap = WindowCapture(
         config=CaptureConfig(
-            scale=1.0,
-            output_format="PNG",
-            target_fps=1.0,
-            capture_area="client",
+            scale=settings.capture_scale,
+            output_format=settings.capture_format,
+            target_fps=settings.capture_fps,
+            capture_area=settings.capture_area,
         )
     )
 
@@ -35,64 +64,75 @@ async def main() -> None:
         print(f"  - {title}")
     print()
 
-    keyword = input("请输入要控制的窗口标题（或部分标题）: ").strip()
+    # 窗口标题：配置优先，否则交互输入
+    keyword = settings.window_title.strip()
+    if not keyword:
+        keyword = input("请输入要控制的窗口标题（或部分标题）: ").strip()
     if not keyword:
         print("未输入标题，退出。")
         return
 
     cap.find_window(keyword)
 
-    # 2. 时停控制（硬暂停：挂起进程，冻结画面且不干扰游戏状态）
+    # 2. 时停控制
     pause = PauseController()
     pause.bind_window(cap._window)
-    pause.set_hard()
+    setup_pause_controller(pause, settings.pause_strategy)
 
-    # 3. VLM 客户端（连接本地 LM Studio）
+    # 3. VLM 客户端
     vlm = VLMClient(
-        base_url="http://127.0.0.1:1234/v1",
-        model="qwen3.6-35b-a3b-apex",
-        api_key="sk-no-key-required",
-        max_tokens=4096,
-        temperature=0.3,
+        base_url=settings.vlm_base_url,
+        model=settings.vlm_model,
+        api_key=settings.vlm_api_key,
+        max_tokens=settings.vlm_max_tokens,
+        temperature=settings.vlm_temperature,
     )
 
     # 4. 记忆系统
-    memory = MemoryManager()
+    memory = MemoryManager(settings.memory_dir)
 
-    # 5. WebUI（可选，设为 None 可关闭）
-    use_webui = input("是否启动 WebUI 监控? (y/n, 默认 y): ").strip().lower() != "n"
+    # 5. WebUI
     webui_manager = None
-    if use_webui:
+    if settings.webui_enabled:
         server = WebUIServer()
         webui_manager = server.get_manager()
-        host = "0.0.0.0"
-        port = 8080
-        print(f"\nWebUI 已启动: http://localhost:{port}")
-        # 在后台线程运行 FastAPI
-        config = uvicorn.Config(server.app, host=host, port=port, loop="asyncio", log_level="warning")
-        threading.Thread(target=lambda: uvicorn.Server(config).run(), daemon=True).start()
+        print(f"\nWebUI 已启动: http://localhost:{settings.webui_port}")
+        config = uvicorn.Config(
+            server.app,
+            host=settings.webui_host,
+            port=settings.webui_port,
+            loop="asyncio",
+            log_level="warning",
+        )
+        threading.Thread(
+            target=lambda: uvicorn.Server(config).run(), daemon=True
+        ).start()
 
     # 6. 创建 Agent
+    stop_hotkey = parse_stop_hotkey(settings.agent_stop_hotkey)
     agent = GameAgent(
         capture=cap,
         pause=pause,
         vlm=vlm,
         memory=memory,
         webui=webui_manager,
-        max_history_turns=6,
-        pause_before_think=True,
+        max_history_turns=settings.agent_max_history_turns,
+        pause_before_think=settings.agent_pause_before_think,
+        action_delay=settings.agent_action_delay,
+        stop_hotkey=stop_hotkey,
     )
 
-    # 7. 输入任务目标
-    task = input("\n请输入任务目标（例如：打开设置菜单）: ").strip()
+    # 7. 任务目标：配置优先，否则交互输入
+    task = settings.task.strip()
+    if not task:
+        task = input("\n请输入任务目标（例如：打开设置菜单）: ").strip()
     if not task:
         task = "探索当前界面，告诉我你看到了什么"
 
     print(f"\n任务: {task}")
-    print("按 F12 全局热键随时停止 Agent（无需窗口焦点）\n")
+    print(f"按 {settings.agent_stop_hotkey.upper()} 全局热键随时停止 Agent（无需窗口焦点）\n")
 
     try:
-        # run 是同步阻塞的，直接在主线程运行
         agent.run(task)
     except KeyboardInterrupt:
         print("\n正在停止...")
