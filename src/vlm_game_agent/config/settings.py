@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Agent 全局配置，支持 .env 文件与环境变量覆盖。"""
+    """Agent 全局配置，支持 .env 文件与环境变量覆盖."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -12,24 +12,39 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # VLM API
-    vlm_api_key: str = ""
-    vlm_base_url: str = "https://api.openai.com/v1"
-    vlm_model: str = "gpt-4o"
+    # ========== VLM API ==========
+    vlm_base_url: str = "http://127.0.0.1:1234/v1"
+    vlm_model: str = "qwen3.6-27b"
+    vlm_api_key: str = "sk-no-key-required"
+    vlm_max_tokens: int = 4096
+    vlm_temperature: float = 0.3
 
-    # 截图默认配置
+    # ========== 截图配置 ==========
     capture_scale: float = 1.0
-    capture_fps: float = 2.0
     capture_format: str = "PNG"
+    capture_fps: float = 1.0
+    capture_area: str = "client"  # client / window
 
-    # 时停控制
-    pause_hotkey: str = "esc"      # 软暂停快捷键
-    resume_hotkey: str = "esc"     # 软恢复快捷键
-    use_hard_pause: bool = False   # 是否使用进程级硬暂停
+    # ========== 时停控制 ==========
+    pause_strategy: str = "hard"  # soft / hard / focus
+    pause_hotkey: str = "esc"
+    resume_hotkey: str = "esc"
 
-    # 记忆系统
+    # ========== Agent 行为 ==========
+    agent_max_history_turns: int = 6
+    agent_pause_before_think: bool = True
+    agent_action_delay: float = 1.0
+    agent_stop_hotkey: str = "f12"
+
+    # ========== 记忆系统 ==========
     memory_dir: str = "./memories"
 
-    # WebUI
+    # ========== WebUI ==========
+    webui_enabled: bool = True
     webui_host: str = "0.0.0.0"
     webui_port: int = 8080
+
+    # ========== 快捷启动（可选） ==========
+    # 设置后跳过交互式输入，直接启动
+    window_title: str = ""  # 窗口标题关键词
+    task: str = ""          # 任务目标
