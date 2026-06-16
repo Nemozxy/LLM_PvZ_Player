@@ -34,10 +34,15 @@ def parse_stop_hotkey(key_str: str) -> keyboard.Key:
     return key_map.get(key_str.lower(), keyboard.Key.f12)
 
 
-def setup_pause_controller(pause: PauseController, strategy: str) -> None:
+def setup_pause_controller(
+    pause: PauseController,
+    strategy: str,
+    pause_hotkey: str = "esc",
+    resume_hotkey: str = "esc",
+) -> None:
     """根据配置设置暂停策略."""
     if strategy == "soft":
-        pause.set_soft()
+        pause.set_soft(pause_key=pause_hotkey, resume_key=resume_hotkey)
     elif strategy == "hard":
         pause.set_hard()
     elif strategy == "focus":
@@ -77,7 +82,12 @@ async def main() -> None:
     # 2. 时停控制
     pause = PauseController()
     pause.bind_window(cap._window)
-    setup_pause_controller(pause, settings.pause_strategy)
+    setup_pause_controller(
+        pause,
+        settings.pause_strategy,
+        pause_hotkey=settings.pause_hotkey,
+        resume_hotkey=settings.resume_hotkey,
+    )
 
     # 3. VLM 客户端
     vlm = VLMClient(
