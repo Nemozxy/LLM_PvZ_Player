@@ -19,6 +19,7 @@ from .llm import VLMClient
 from .memory import MemoryManager
 from .parser import ToolCall, parse_tool_calls
 from .prompt import build_system_prompt
+from .compressor import ContextCompressor
 
 
 class GameAgent:
@@ -44,6 +45,7 @@ class GameAgent:
         delay_key: float = 1.5,
         delay_type: float = 1.0,
         delay_idle: float = 3.0,
+        compressor: ContextCompressor | None = None,
     ) -> None:
         """初始化 Agent.
 
@@ -62,6 +64,7 @@ class GameAgent:
             delay_key: 按键类动作后的最低观察等待（秒）。
             delay_type: 文本输入类动作后的最低观察等待（秒）。
             delay_idle: 无有效动作（纯观察轮）的最低等待（秒）。
+            compressor: 上下文压缩器（可选），达到阈值时自动压缩历史。
         """
         self.capture = capture
         self.pause = pause
@@ -85,6 +88,8 @@ class GameAgent:
             "type": delay_type,
         }
         self._delay_idle = delay_idle
+
+        self._compressor = compressor
 
         self._executor: ActionExecutor | None = None
         self._history: list[dict[str, Any]] = []
@@ -159,6 +164,15 @@ class GameAgent:
             # 4. 构建本轮消息（最新截图）
             messages = self._build_messages_with_latest_frame(img_b64)
 
+            # 4.5 上下文压缩（达到阈值时触发，不需要额外暂停游戏）
+            if self._compressor and self._compressor.should_compress(messages):
+                logger.info("[Agent] 上下文达到压缩阈值，正在压缩...")
+                self._notify_webui("log", "上下文压缩中...", "info")
+                compressed = self._compressor.compress(messages)
+                # 压缩结果回写到 _history（去掉末尾最新截图消息）
+                self._history = compressed[:-1]
+                messages = compressed
+
             # 5. VLM 推理
             try:
                 raw_output, reasoning = self.vlm.chat(messages)
@@ -214,7 +228,14 @@ class GameAgent:
                 self._notify_webui("action", action, str(tc.arguments))
 
                 # 把执行结果反馈加入历史
-                feedback = f"[执行结果] action={action}, status={result.get('status')}, detail={result}"
+                if result.get("status") == "error":
+                    feedback = (
+                        f"[执行失败] action={action}, "
+                        f"error={result.get('error', '未知错误')}。"
+                        f"请重新观察截图，检查坐标是否正确或操作是否可行，然后重试或换一种方式。"
+                    )
+                else:
+                    feedback = f"[执行结果] action={action}, status={result.get('status')}, detail={result}"
                 self._push_history_user_text(feedback)
                 logger.debug("[Agent] {}", feedback)
 

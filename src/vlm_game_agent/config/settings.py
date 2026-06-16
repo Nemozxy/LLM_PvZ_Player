@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     agent_delay_type: float = 1.0     # type
     agent_delay_idle: float = 3.0     # 无有效动作（纯观察轮）
 
+    # -- 上下文压缩 --
+    # 当上下文 token 数达到 max_tokens 的指定比例时触发压缩
+    # 压缩使用独立配置的模型，不需要暂停游戏
+    agent_context_max_tokens: int = 32768     # 上下文窗口总大小（token）
+    agent_context_compress_threshold: float = 0.7  # 达到 70% 时触发压缩
+    # 压缩模型配置（默认复用主 VLM，可单独指定更小的模型加速压缩）
+    vlm_compress_base_url: str = ""   # 留空则复用 vlm_base_url
+    vlm_compress_model: str = ""      # 留空则复用 vlm_model
+    vlm_compress_api_key: str = ""    # 留空则复用 vlm_api_key
+
     # ========== 记忆系统 ==========
     memory_dir: str = "./memories"
 

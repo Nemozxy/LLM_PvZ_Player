@@ -12,6 +12,7 @@ from loguru import logger
 from pynput import keyboard
 
 from vlm_game_agent.agent import GameAgent
+from vlm_game_agent.agent.compressor import ContextCompressor
 from vlm_game_agent.agent.llm import VLMClient
 from vlm_game_agent.agent.memory import MemoryManager
 from vlm_game_agent.config.settings import Settings
@@ -117,7 +118,19 @@ def main() -> None:
             target=lambda: uvicorn.Server(config).run(), daemon=True
         ).start()
 
-    # 6. 创建 Agent
+    # 6. 上下文压缩器
+    compress_base_url = settings.vlm_compress_base_url or settings.vlm_base_url
+    compress_model = settings.vlm_compress_model or settings.vlm_model
+    compress_api_key = settings.vlm_compress_api_key or settings.vlm_api_key
+    compressor = ContextCompressor(
+        base_url=compress_base_url,
+        model=compress_model,
+        api_key=compress_api_key,
+        max_tokens=settings.agent_context_max_tokens,
+        compress_threshold=settings.agent_context_compress_threshold,
+    )
+
+    # 7. 创建 Agent
     stop_hotkey = parse_stop_hotkey(settings.agent_stop_hotkey)
     agent = GameAgent(
         capture=cap,
@@ -133,6 +146,7 @@ def main() -> None:
         delay_key=settings.agent_delay_key,
         delay_type=settings.agent_delay_type,
         delay_idle=settings.agent_delay_idle,
+        compressor=compressor,
         stop_hotkey=stop_hotkey,
     )
 
