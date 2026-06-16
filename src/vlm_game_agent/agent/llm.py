@@ -25,8 +25,9 @@ class VLMClient:
         temperature: float = 0.4,
         retries: int = 3,
         retry_delay: float = 2.0,
+        timeout: float = 300.0,
     ) -> None:
-        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
