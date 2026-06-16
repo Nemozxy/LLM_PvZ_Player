@@ -1,24 +1,27 @@
-"""[feat] VLM 调用封装 - OpenAI 兼容格式 + 重试 + 思维链保留."""
+"""[feat] VLM 调用封装 - 基于 curl subprocess（兼容 llama.cpp 协议差异）."""
 
 from __future__ import annotations
 
+import json
+import subprocess
 import time
 from typing import Any
 
 from loguru import logger
-from openai import OpenAI
 
 
 class VLMClient:
     """VLM 客户端封装.
 
-    使用 OpenAI 兼容 API 调用本地或远程 VLM 服务。
+    使用 curl subprocess 调用 llama.cpp 兼容 API。
     内置自动重试，并保留 reasoning_content（思维链）。
+    Python HTTP 库（urllib/httpx/openai SDK）与部分 llama.cpp 版本存在
+    协议兼容性问题，curl 是唯一稳定的通信方式。
     """
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:1234/v1",
+        base_url: str = "http://127.0.0.1:8888/v1",
         model: str = "qwen3.6-35b-a3b-apex",
         api_key: str = "sk-no-key-required",
         max_tokens: int = 8192,
@@ -26,14 +29,19 @@ class VLMClient:
         retries: int = 3,
         retry_delay: float = 2.0,
         timeout: float = 300.0,
+        curl_path: str = "curl",
     ) -> None:
-        self.client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+        self.base_url = base_url.rstrip("/")
+        self.chat_url = f"{self.base_url}/chat/completions"
         self.model = model
+        self.api_key = api_key
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.retries = retries
         self.retry_delay = retry_delay
-        self.last_prompt_tokens: int = 0  # 上一次请求的 prompt token 数
+        self.timeout = timeout
+        self.curl_path = curl_path
+        self.last_prompt_tokens: int = 0
 
     def chat(
         self,
@@ -41,20 +49,22 @@ class VLMClient:
     ) -> tuple[str, str]:
         """发送聊天请求并返回 (内容, 思维链).
 
-        同时记录本次请求的 prompt_tokens 到 self.last_prompt_tokens，
-        供外部精确判断上下文使用量。
-
         Args:
             messages: OpenAI 格式的消息列表。
 
         Returns:
             (content, reasoning_content) 元组。
-            content 是模型最终输出（可能包含 <tool_call>）。
-            reasoning_content 是思维链（供日志展示）。
 
         Raises:
             RuntimeError: API 调用失败时抛出。
         """
+        body = json.dumps({
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+        }, ensure_ascii=False)
+
         last_exc: Exception | None = None
 
         for attempt in range(1, self.retries + 1):
@@ -62,31 +72,56 @@ class VLMClient:
             self._log_request(messages)
 
             try:
-                resp = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,  # type: ignore[arg-type]
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
+                t0 = time.perf_counter()
+                # 使用 stdin 传入请求体，避免 Windows 命令行长度限制
+                # (base64 图片可能超过 8192 字符)
+                result = subprocess.run(
+                    [
+                        self.curl_path, "-s",
+                        self.chat_url,
+                        "-H", "Content-Type: application/json",
+                        "-d", "@-",
+                        "--max-time", str(int(self.timeout)),
+                    ],
+                    input=body,
+                    capture_output=True,
+                    encoding="utf-8",
+                    timeout=self.timeout + 10,
                 )
+                elapsed = time.perf_counter() - t0
 
-                # 记录精确的 prompt token 数
-                if resp.usage and resp.usage.prompt_tokens is not None:
-                    self.last_prompt_tokens = resp.usage.prompt_tokens
+                if result.returncode != 0:
+                    raise RuntimeError(f"curl 退出码 {result.returncode}: {result.stderr[:200]}")
+
+                raw = result.stdout.strip()
+                if not raw:
+                    raise RuntimeError("空响应")
+
+                resp = json.loads(raw)
+
+                # 检查错误
+                if "error" in resp:
+                    raise RuntimeError(f"API 错误: {resp['error']}")
+
+                # 记录 prompt_tokens
+                usage = resp.get("usage", {})
+                if usage and "prompt_tokens" in usage:
+                    self.last_prompt_tokens = usage["prompt_tokens"]
                     logger.debug("[VLM] prompt_tokens: {}", self.last_prompt_tokens)
 
-                msg = resp.choices[0].message
-                content = msg.content or ""
-                reasoning = getattr(msg, "reasoning_content", None) or ""
+                msg = resp["choices"][0]["message"]
+                content = msg.get("content") or ""
+                reasoning = msg.get("reasoning_content") or ""
+
                 logger.debug(
-                    "[VLM] 返回 content={} chars, reasoning={} chars",
-                    len(content),
-                    len(reasoning),
+                    "[VLM] 返回 content={} chars, reasoning={} chars, 耗时 {:.1f}s",
+                    len(content), len(reasoning), elapsed,
                 )
                 return content, reasoning
+
             except Exception as exc:
                 last_exc = exc
-                status = getattr(exc, "status_code", None) or getattr(exc, "code", "unknown")
-                logger.warning("[VLM] 第 {} 次请求失败 [{}]: {}", attempt, status, exc)
+                logger.warning("[VLM] 第 {} 次请求失败: {}", attempt, exc)
                 if attempt < self.retries:
                     logger.info("[VLM] {} 秒后重试...", self.retry_delay)
                     time.sleep(self.retry_delay)
