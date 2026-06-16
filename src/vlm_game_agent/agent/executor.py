@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable
 
 import pyautogui
+import pyperclip
 from loguru import logger
 
 # 禁用 pyautogui 的 FailSafe（防止鼠标移到角落触发异常）
@@ -107,7 +108,7 @@ class ActionExecutor:
 
             elif action == "type":
                 text = args.get("text", "")
-                pyautogui.typewrite(text, interval=0.01)
+                self._type_text(text)
                 result["typed"] = text
 
             elif action == "key":
@@ -145,3 +146,13 @@ class ActionExecutor:
             result["error"] = str(exc)
 
         return result
+
+    @staticmethod
+    def _type_text(text: str) -> None:
+        """输入文本，支持中文等非 ASCII 字符.
+
+        pyautogui.typewrite 只支持 ASCII，遇到中文会静默跳过。
+        改用剪贴板 + Ctrl+V 方式输入，兼容所有语言。
+        """
+        pyperclip.copy(text)
+        pyautogui.hotkey("ctrl", "v")
