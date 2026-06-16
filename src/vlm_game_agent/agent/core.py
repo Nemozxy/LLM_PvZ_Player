@@ -39,6 +39,11 @@ class GameAgent:
         pause_before_think: bool = True,
         stop_hotkey: keyboard.Key = keyboard.Key.f12,
         action_delay: float = 1.0,
+        delay_click: float = 2.0,
+        delay_drag: float = 2.5,
+        delay_key: float = 1.5,
+        delay_type: float = 1.0,
+        delay_idle: float = 3.0,
     ) -> None:
         """初始化 Agent.
 
@@ -51,7 +56,12 @@ class GameAgent:
             max_history_turns: 保留的最大历史对话轮数。
             pause_before_think: 是否在 VLM 推理前暂停游戏。
             stop_hotkey: 全局停止热键，默认 F12。
-            action_delay: 每轮动作执行后的最小等待时间（秒），给游戏响应留出时间。
+            action_delay: 基础兜底延迟（秒），动作感知延迟会在此基础上取最大值。
+            delay_click: 点击类动作后的最低观察等待（秒）。
+            delay_drag: 拖拽类动作后的最低观察等待（秒）。
+            delay_key: 按键类动作后的最低观察等待（秒）。
+            delay_type: 文本输入类动作后的最低观察等待（秒）。
+            delay_idle: 无有效动作（纯观察轮）的最低等待（秒）。
         """
         self.capture = capture
         self.pause = pause
@@ -62,6 +72,19 @@ class GameAgent:
         self.pause_before_think = pause_before_think
         self.stop_hotkey = stop_hotkey
         self.action_delay = action_delay
+
+        # 动作感知延迟映射表
+        self._action_delays: dict[str, float] = {
+            "left_click": delay_click,
+            "right_click": delay_click,
+            "double_click": delay_click,
+            "triple_click": delay_click,
+            "middle_click": delay_click,
+            "left_click_drag": delay_drag,
+            "key": delay_key,
+            "type": delay_type,
+        }
+        self._delay_idle = delay_idle
 
         self._executor: ActionExecutor | None = None
         self._history: list[dict[str, Any]] = []
@@ -162,7 +185,7 @@ class GameAgent:
                 logger.warning("[Agent] 未解析到有效动作")
                 self._notify_webui("log", "未解析到动作，继续观察", "warning")
                 self._push_history_assistant(raw_output)
-                time.sleep(1)
+                time.sleep(self._delay_idle)
                 continue
 
             # 将 assistant 输出加入历史
@@ -195,11 +218,8 @@ class GameAgent:
                 # 连续动作之间留小间隔，让游戏响应
                 time.sleep(0.15)
 
-            # 9. 等待画面变化（基础延迟 + 模型主动 wait 取最大值）
-            wait_time = self.action_delay
-            for tc in tool_calls:
-                if tc.arguments.get("action") == "wait":
-                    wait_time = max(wait_time, tc.arguments.get("time", 0.5))
+            # 9. 等待画面变化（动作感知延迟 + 基础延迟 + 模型主动 wait，三者取最大值）
+            wait_time = self._compute_wait_time(tool_calls)
             logger.debug("[Agent] 等待 {} 秒", wait_time)
             time.sleep(wait_time)
 
@@ -361,3 +381,39 @@ class GameAgent:
         # 复用 capture 中的客户区计算逻辑
         box = self.capture._window_box  # 当前已是客户区（capture_area=client）
         return box
+
+    def _compute_wait_time(self, tool_calls: list[ToolCall]) -> float:
+        """根据本轮动作计算合理的观察等待时间.
+
+        三层保障取最大值：
+        1. 动作感知延迟：不同动作类型有不同的最低观察时间
+        2. 基础兜底延迟：action_delay（.env 可配）
+        3. 模型主动 wait：如果模型输出了 wait 动作，取其指定时间
+
+        Returns:
+            本轮应等待的秒数。
+        """
+        # 1. 动作感知延迟：本轮所有可执行动作的延迟取最大值
+        action_delay = 0.0
+        has_action = False
+        for tc in tool_calls:
+            action = tc.arguments.get("action", "")
+            if action in ("terminate", "answer", "wait"):
+                continue
+            has_action = True
+            delay = self._action_delays.get(action)
+            if delay is not None:
+                action_delay = max(action_delay, delay)
+
+        # 无有效动作时使用 idle 延迟
+        if not has_action:
+            action_delay = self._delay_idle
+
+        # 2. 模型主动 wait
+        model_wait = 0.0
+        for tc in tool_calls:
+            if tc.arguments.get("action") == "wait":
+                model_wait = max(model_wait, tc.arguments.get("time", 0.5))
+
+        # 三者取最大值
+        return max(self.action_delay, action_delay, model_wait)

@@ -1,6 +1,5 @@
 """[feat] Agent 集成示例 - 完整的 截图→VLM→执行 闭环."""
 
-import asyncio
 import sys
 import threading
 from pathlib import Path
@@ -51,7 +50,7 @@ def setup_pause_controller(
         pause.set_hard()
 
 
-async def main() -> None:
+def main() -> None:
     settings = Settings()
 
     # 1. 截图器
@@ -129,6 +128,11 @@ async def main() -> None:
         max_history_turns=settings.agent_max_history_turns,
         pause_before_think=settings.agent_pause_before_think,
         action_delay=settings.agent_action_delay,
+        delay_click=settings.agent_delay_click,
+        delay_drag=settings.agent_delay_drag,
+        delay_key=settings.agent_delay_key,
+        delay_type=settings.agent_delay_type,
+        delay_idle=settings.agent_delay_idle,
         stop_hotkey=stop_hotkey,
     )
 
@@ -153,4 +157,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

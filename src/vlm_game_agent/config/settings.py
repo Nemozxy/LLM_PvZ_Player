@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     agent_action_delay: float = 1.0
     agent_stop_hotkey: str = "f12"
 
+    # -- 动作感知延迟：执行不同动作后最低观察等待时间（秒） --
+    # 实际等待 = max(agent_action_delay, 本轮动作最大延迟, 模型主动wait)
+    agent_delay_click: float = 2.0    # left_click / right_click / double_click / triple_click / middle_click
+    agent_delay_drag: float = 2.5     # left_click_drag
+    agent_delay_key: float = 1.5      # key
+    agent_delay_type: float = 1.0     # type
+    agent_delay_idle: float = 3.0     # 无有效动作（纯观察轮）
+
     # ========== 记忆系统 ==========
     memory_dir: str = "./memories"
 

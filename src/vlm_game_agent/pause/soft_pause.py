@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 
 import pygetwindow as gw
@@ -10,12 +11,18 @@ from pynput.keyboard import Controller, Key
 
 from .base import PauseStrategy
 
+if sys.platform == "win32":
+    import win32gui
+    import win32con
+    import win32api
+    import win32process
+
 
 class SoftPauseStrategy(PauseStrategy):
     """软暂停策略.
 
     利用游戏内置的暂停快捷键（如 Esc、Space、P 等）冻结画面。
-    通过 pynput 发送全局按键，无需目标窗口拥有焦点即可触发系统级热键。
+    发送按键前会确保游戏窗口拥有焦点，避免按键被其他窗口接收。
     """
 
     def __init__(
@@ -44,16 +51,43 @@ class SoftPauseStrategy(PauseStrategy):
         return "soft"
 
     def pause(self, window: gw.Win32Window) -> None:
-        """发送暂停快捷键."""
+        """发送暂停快捷键，确保游戏窗口在前台."""
+        self._ensure_foreground(window)
         logger.info("[时停-软暂停] 发送暂停键: {}", self.pause_key)
         self._press_key(self.pause_key)
         time.sleep(self.delay_after_pause)
 
     def resume(self, window: gw.Win32Window) -> None:
-        """发送恢复快捷键."""
+        """发送恢复快捷键，确保游戏窗口在前台."""
+        self._ensure_foreground(window)
         logger.info("[时停-软暂停] 发送恢复键: {}", self.resume_key)
         self._press_key(self.resume_key)
         time.sleep(self.delay_after_resume)
+
+    @staticmethod
+    def _ensure_foreground(window: gw.Win32Window) -> None:
+        """确保目标窗口是前台窗口，避免按键发到错误的应用."""
+        if sys.platform != "win32":
+            return
+        hwnd = window._hWnd
+        if win32gui.GetForegroundWindow() == hwnd:
+            return
+        try:
+            # 恢复最小化窗口
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            # AttachThreadInput 绕过前台限制
+            current_thread = win32api.GetCurrentThreadId()
+            target_thread, _ = win32process.GetWindowThreadProcessId(hwnd)
+            if current_thread != target_thread:
+                win32process.AttachThreadInput(current_thread, target_thread, True)
+                win32gui.SetForegroundWindow(hwnd)
+                win32process.AttachThreadInput(current_thread, target_thread, False)
+            else:
+                win32gui.SetForegroundWindow(hwnd)
+            time.sleep(0.05)
+        except Exception as exc:
+            logger.warning("[时停-软暂停] 切换前台窗口失败: {}", exc)
 
     def _press_key(self, key_name: str) -> None:
         """通过 pynput 按下并释放指定按键."""

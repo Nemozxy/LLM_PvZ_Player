@@ -9,8 +9,9 @@ import pyautogui
 import pyperclip
 from loguru import logger
 
-# 禁用 pyautogui 的 FailSafe（防止鼠标移到角落触发异常）
-pyautogui.FAILSAFE = False
+# 保留 FailSafe 安全机制：鼠标快速移到左上角时抛异常停止 Agent，
+# 这是用户在 Agent 失控时最后的干预手段，不应禁用。
+# pyautogui.FAILSAFE 默认为 True，无需额外设置。
 
 
 class ActionExecutor:
