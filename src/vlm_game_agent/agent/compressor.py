@@ -1,4 +1,4 @@
-"""[feat] 上下文压缩 - 阈值触发、独立模型、不中断游戏."""
+"""[feat] 上下文压缩 - 精确 token 计数触发、复用主模型、游戏暂停期间执行."""
 
 from __future__ import annotations
 
@@ -8,40 +8,16 @@ from typing import Any
 from loguru import logger
 from openai import OpenAI
 
-# 粗略 token 估算常数：中文约 1.5 字符/token，英文约 4 字符/token
-# 取中间值 2.5 字符/token 作为通用估算
-_CHARS_PER_TOKEN = 2.5
-
-
-def estimate_tokens(messages: list[dict[str, Any]]) -> int:
-    """粗略估算消息列表的 token 数.
-
-    文本按字符数除以常数估算，图片按固定值估算。
-    不追求精确，只需用于阈值判断。
-    """
-    total = 0
-    for msg in messages:
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            total += len(content) / _CHARS_PER_TOKEN
-        elif isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict):
-                    ptype = part.get("type", "")
-                    if ptype == "text":
-                        total += len(part.get("text", "")) / _CHARS_PER_TOKEN
-                    elif ptype == "image_url":
-                        # 图片 token 数取决于分辨率，估算为固定值
-                        total += 1000
-    return int(total)
-
 
 class ContextCompressor:
     """上下文压缩器.
 
-    当上下文 token 数达到阈值时，使用独立配置的轻量模型
-    将旧消息压缩为摘要，保留 system 消息和最近几轮对话。
-    压缩过程不需要暂停游戏。
+    当 VLM 返回的 prompt_tokens 达到用户配置的阈值时触发压缩。
+    复用主模型（避免 llama.cpp 并发问题），在游戏已暂停的推理阶段执行，
+    不需要额外暂停游戏。
+
+    阈值判断由 core.py 基于 VLM 响应的精确 prompt_tokens 完成，
+    压缩器本身只负责压缩逻辑。
     """
 
     def __init__(
@@ -56,10 +32,10 @@ class ContextCompressor:
         """初始化压缩器.
 
         Args:
-            base_url: 压缩模型 API 地址。
-            model: 压缩模型名称。
-            api_key: 压缩模型 API Key。
-            max_tokens: 上下文窗口总大小（token）。
+            base_url: 压缩模型 API 地址（默认复用主 VLM）。
+            model: 压缩模型名称（默认复用主 VLM）。
+            api_key: 压缩模型 API Key（默认复用主 VLM）。
+            max_tokens: 上下文窗口总大小（token），由用户在 .env 中配置。
             compress_threshold: 触发压缩的阈值比例（0.0-1.0）。
             keep_recent_messages: 压缩时保留的最近消息条数。
         """
@@ -69,16 +45,6 @@ class ContextCompressor:
         self.compress_threshold = compress_threshold
         self.keep_recent_messages = keep_recent_messages
         self._last_summary = ""
-
-    def should_compress(self, messages: list[dict[str, Any]]) -> bool:
-        """判断是否需要压缩.
-
-        当估算 token 数超过 max_tokens * threshold 时返回 True。
-        """
-        current = estimate_tokens(messages)
-        threshold = int(self.max_tokens * self.compress_threshold)
-        logger.debug("[压缩] 当前约 {} token，阈值 {}", current, threshold)
-        return current >= threshold
 
     def compress(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """压缩上下文：将旧消息总结为摘要，保留 system 和最近消息.
@@ -130,11 +96,9 @@ class ContextCompressor:
 
         result.extend(recent_messages)
 
-        old_tokens = estimate_tokens(messages)
-        new_tokens = estimate_tokens(result)
         logger.info(
-            "[压缩] 完成：{} 条消息 → {} 条，约 {} token → {} token",
-            len(messages), len(result), old_tokens, new_tokens,
+            "[压缩] 完成：{} 条消息 → {} 条",
+            len(messages), len(result),
         )
         return result
 

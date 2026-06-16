@@ -33,12 +33,16 @@ class VLMClient:
         self.temperature = temperature
         self.retries = retries
         self.retry_delay = retry_delay
+        self.last_prompt_tokens: int = 0  # 上一次请求的 prompt token 数
 
     def chat(
         self,
         messages: list[dict[str, Any]],
     ) -> tuple[str, str]:
         """发送聊天请求并返回 (内容, 思维链).
+
+        同时记录本次请求的 prompt_tokens 到 self.last_prompt_tokens，
+        供外部精确判断上下文使用量。
 
         Args:
             messages: OpenAI 格式的消息列表。
@@ -64,6 +68,12 @@ class VLMClient:
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
                 )
+
+                # 记录精确的 prompt token 数
+                if resp.usage and resp.usage.prompt_tokens is not None:
+                    self.last_prompt_tokens = resp.usage.prompt_tokens
+                    logger.debug("[VLM] prompt_tokens: {}", self.last_prompt_tokens)
+
                 msg = resp.choices[0].message
                 content = msg.content or ""
                 reasoning = getattr(msg, "reasoning_content", None) or ""

@@ -90,6 +90,7 @@ class GameAgent:
         self._delay_idle = delay_idle
 
         self._compressor = compressor
+        self._compress_needed = False
 
         self._executor: ActionExecutor | None = None
         self._history: list[dict[str, Any]] = []
@@ -164,18 +165,35 @@ class GameAgent:
             # 4. 构建本轮消息（最新截图）
             messages = self._build_messages_with_latest_frame(img_b64)
 
-            # 4.5 上下文压缩（达到阈值时触发，不需要额外暂停游戏）
-            if self._compressor and self._compressor.should_compress(messages):
-                logger.info("[Agent] 上下文达到压缩阈值，正在压缩...")
+            # 4.5 上下文压缩（由上一轮 VLM 返回的精确 prompt_tokens 触发）
+            # 复用主模型压缩，游戏已处于暂停状态，不需要额外暂停
+            if self._compressor and self._compress_needed:
+                logger.info("[Agent] 正在压缩上下文...")
                 self._notify_webui("log", "上下文压缩中...", "info")
                 compressed = self._compressor.compress(messages)
                 # 压缩结果回写到 _history（去掉末尾最新截图消息）
                 self._history = compressed[:-1]
                 messages = compressed
+                self._compress_needed = False
 
             # 5. VLM 推理
             try:
                 raw_output, reasoning = self.vlm.chat(messages)
+
+                # 用 VLM 返回的精确 prompt_tokens 判断是否需要压缩
+                if self._compressor:
+                    prompt_tokens = self.vlm.last_prompt_tokens
+                    threshold_tokens = int(
+                        self._compressor.max_tokens * self._compressor.compress_threshold
+                    )
+                    if prompt_tokens >= threshold_tokens:
+                        logger.info(
+                            "[Agent] 上下文已用 {} token（阈值 {}），下轮将压缩",
+                            prompt_tokens, threshold_tokens,
+                        )
+                        self._notify_webui("log", f"上下文达到 {prompt_tokens} token，即将压缩", "info")
+                        self._compress_needed = True
+
                 if reasoning:
                     logger.debug("[Agent] VLM 思维链:\n{}", reasoning)
                     self._notify_webui("log", f"[思考] {reasoning}", "debug")
