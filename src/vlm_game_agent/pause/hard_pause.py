@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import sys
 from ctypes import windll, wintypes
 
@@ -37,17 +38,37 @@ if sys.platform == "win32":
     PROCESS_SUSPEND_RESUME = 0x0800
 
 
+def _do_resume_process(pid: int) -> bool:
+    """恢复指定 PID 的进程，成功返回 True."""
+    h_process = _OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
+    if not h_process:
+        logger.warning("[时停-硬暂停] 紧急恢复: OpenProcess 失败，PID: {}", pid)
+        return False
+    status = _NtResumeProcess(h_process)
+    _CloseHandle(h_process)
+    if status >= 0:
+        logger.info("[时停-硬暂停] 紧急恢复: 进程已恢复，PID: {}", pid)
+        return True
+    logger.error("[时停-硬暂停] 紧急恢复: NtResumeProcess 失败，状态码: 0x{:08X}", status & 0xFFFFFFFF)
+    return False
+
+
 class HardPauseStrategy(PauseStrategy):
     """硬暂停策略（进程级）.
 
     通过 Windows NtSuspendProcess / NtResumeProcess 直接挂起/恢复目标进程的所有线程，
     无视游戏是否有暂停功能，强制冻结画面。
 
+    内置崩溃保护：通过 atexit 注册紧急恢复函数，确保 Python 进程异常退出时
+    也能尝试恢复被挂起的游戏进程，避免游戏永久冻结。
+
     注意：部分反作弊系统可能会检测到此行为。
     """
 
     def __init__(self) -> None:
         self._pid: int | None = None
+        self._suspended = False
+        atexit.register(self._emergency_resume)
 
     @property
     def name(self) -> str:
@@ -73,6 +94,7 @@ class HardPauseStrategy(PauseStrategy):
         _CloseHandle(h_process)
 
         if status >= 0:
+            self._suspended = True
             logger.info("[时停-硬暂停] 进程已挂起，PID: {}", pid)
         else:
             logger.error("[时停-硬暂停] NtSuspendProcess 失败，状态码: 0x{:08X}", status & 0xFFFFFFFF)
@@ -95,15 +117,23 @@ class HardPauseStrategy(PauseStrategy):
         _CloseHandle(h_process)
 
         if status >= 0:
+            self._suspended = False
             logger.info("[时停-硬暂停] 进程已恢复，PID: {}", pid)
         else:
             logger.error("[时停-硬暂停] NtResumeProcess 失败，状态码: 0x{:08X}", status & 0xFFFFFFFF)
 
-    def _get_pid(self, window: gw.Win32Window) -> int | None:
-        """通过窗口句柄获取进程 PID."""
-        if self._pid is not None:
-            return self._pid
+    def _emergency_resume(self) -> None:
+        """atexit 紧急恢复：Python 进程退出时确保游戏不被永久冻结."""
+        if not self._suspended or self._pid is None:
+            return
+        logger.warning("[时停-硬暂停] 检测到进程退出但游戏仍处于挂起状态，执行紧急恢复，PID: {}", self._pid)
+        _do_resume_process(self._pid)
 
+    def _get_pid(self, window: gw.Win32Window) -> int | None:
+        """通过窗口句柄获取进程 PID.
+
+        每次都重新查询，避免游戏重启后 PID 变化导致恢复错误进程。
+        """
         hwnd = window._hWnd
         try:
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
