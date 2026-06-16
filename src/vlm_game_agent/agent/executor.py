@@ -113,9 +113,12 @@ class ActionExecutor:
             elif action == "key":
                 keys = args.get("keys", [])
                 if keys:
-                    # 将数组中的按键依次按下，再逆序释放
-                    pyautogui.keyDown(*keys)
-                    pyautogui.keyUp(*keys)
+                    # pyautogui.keyDown/keyUp 只接受单个按键，
+                    # 需逐个按下再逆序释放，才能正确模拟组合键（如 Ctrl+C）
+                    for k in keys:
+                        pyautogui.keyDown(k)
+                    for k in reversed(keys):
+                        pyautogui.keyUp(k)
                 result["keys"] = keys
 
             elif action == "wait":
