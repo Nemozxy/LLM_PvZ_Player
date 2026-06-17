@@ -233,9 +233,20 @@ def step4_actions(
                 imitater = seed.imitator_type >= 0
                 if imitater:
                     plant_type = seed.imitator_type
-                print(f"  💉 PutPlant row={row} col={col} type={plant_type} imitater={imitater}")
+                print(f"  💉 种植: 点击卡片[{idx}] + 点击格子({row},{col})")
                 try:
-                    injector.put_plant(row, col, plant_type, imitater)
+                    # 点卡片中心
+                    if seed.x > 0 and seed.y > 0:
+                        card_cx = seed.x + seed.width // 2
+                        card_cy = seed.y + seed.height // 2
+                    else:
+                        card_cx = 80 + seed.index * 51 + 25
+                        card_cy = 10
+                    injector.mouse_click(card_cx, card_cy)
+                    time.sleep(0.1)
+                    # 点格子中心
+                    gx, gy = injector.grid_to_pixel(row, col)
+                    injector.mouse_click(gx, gy)
                     print("  ✅ 已执行 — 观察游戏画面")
                 except Exception as exc:
                     print(f"  ❌ 失败: {exc}")
