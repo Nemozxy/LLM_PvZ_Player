@@ -4,6 +4,68 @@ from __future__ import annotations
 
 import json
 
+PVZ_ACTION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "pvz_action",
+        "description": (
+            "植物大战僵尸专用动作。利用内存读取的精确坐标，直接执行高层语义化操作，无需手动计算点击位置。\n"
+            "* 种植物时系统会自动点击卡片再点击目标格子。\n"
+            "* 铲子会自动点击铲子按钮再点击目标格子。\n"
+            "* 收集阳光会自动点击阳光的精确位置。\n"
+            "* row 和 col 均为 0-based：行 0~5（从上到下），列 0~8（从左到右）。\n"
+            "* card_index 与 <game_state> 中卡片的 [序号] 一致。\n"
+            "* 执行前请确认：阳光足够、卡片就绪、目标格子空闲。"
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["action"],
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": (
+                        "要执行的 PvZ 动作。可用动作：\n"
+                        "* `place_plant`：种植植物。先选中卡片，再点击目标格子。\n"
+                        "* `shovel`：铲除植物。先点击铲子按钮，再点击目标格子。\n"
+                        "* `collect_sun`：收集阳光。点击场上的阳光。\n"
+                        "* `click_card`：选中一张卡片（暂不放置，用于后续操作）。\n"
+                        "* `use_cob_cannon`：使用玉米加农炮。先点击炮台，再点击落点。"
+                    ),
+                    "enum": [
+                        "place_plant", "shovel", "collect_sun",
+                        "click_card", "use_cob_cannon",
+                    ],
+                },
+                "card_index": {
+                    "type": "integer",
+                    "description": "卡片槽位号 (0-based)，与 <game_state> 中卡片的 [序号] 一致。place_plant 和 click_card 必需。",
+                },
+                "row": {
+                    "type": "integer",
+                    "description": "目标行号 (0-based, 0~5)。place_plant / shovel / use_cob_cannon 必需。",
+                },
+                "col": {
+                    "type": "integer",
+                    "description": "目标列号 (0-based, 0~8)。place_plant / shovel / use_cob_cannon 必需。",
+                },
+                "target_row": {
+                    "type": "integer",
+                    "description": "仅 use_cob_cannon 需要。落点行号 (0-based)。",
+                },
+                "target_col": {
+                    "type": "integer",
+                    "description": "仅 use_cob_cannon 需要。落点列号 (0-based)。",
+                },
+                "index": {
+                    "type": "string",
+                    "description": "仅 collect_sun 需要。收集第几个阳光 (0-based 整数)，或 \"all\" 收集所有阳光。默认 \"all\"。",
+                },
+            },
+        },
+    },
+}
+
+
 COMPUTER_USE_SCHEMA = {
     "type": "function",
     "function": {
@@ -101,6 +163,7 @@ def build_system_prompt(
         完整的系统提示文本。
     """
     tool_json = json.dumps(COMPUTER_USE_SCHEMA, ensure_ascii=False, indent=2)
+    pvz_tool_json = json.dumps(PVZ_ACTION_SCHEMA, ensure_ascii=False, indent=2) if pvz_mode else ""
 
     if pvz_mode:
         prompt = f"""你正在玩《植物大战僵尸》(Plants vs. Zombies)，通过读取游戏内存和截图来制定策略，并用鼠标键盘操作游戏。
@@ -145,8 +208,62 @@ def build_system_prompt(
 函数签名在 <tools></tools> XML 标签中：
 <tools>
 {tool_json}
+"""
+
+    if pvz_mode:
+        prompt += f"""{pvz_tool_json}
 </tools>
 
+### 优先使用 PvZ 专用动作
+
+当你在玩 PvZ 时，**优先使用 `pvz_action` 而非 `computer_use`**：
+- 种植物 → `pvz_action` (place_plant)，而非手动 left_click 卡片和格子
+- 铲植物 → `pvz_action` (shovel)，而非手动 left_click 铲子和格子
+- 收集阳光 → `pvz_action` (collect_sun)，而非手动 left_click 阳光位置
+- 玉米炮 → `pvz_action` (use_cob_cannon)
+
+只有以下情况才使用 `computer_use`：
+- 点击菜单、按钮等非战斗 UI 元素
+- 按键盘快捷键
+- 需要等待 (wait)
+- 结束任务 (terminate)
+
+### PvZ 动作示例
+
+种一个向日葵到第2行第3列（假设向日葵卡片序号为0）：
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "place_plant", "card_index": 0, "row": 2, "col": 3}}}}
+</tool_call>
+
+收集所有阳光：
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "collect_sun", "index": "all"}}}}
+</tool_call>
+
+铲除第1行第4列的植物：
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "shovel", "row": 1, "col": 4}}}}
+</tool_call>
+
+一回合内多种植物 + 收集阳光：
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "collect_sun", "index": "all"}}}}
+</tool_call>
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "place_plant", "card_index": 0, "row": 1, "col": 0}}}}
+</tool_call>
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "place_plant", "card_index": 0, "row": 1, "col": 1}}}}
+</tool_call>
+<tool_call>
+{{"name": "computer_use", "arguments": {{"action": "wait", "time": 2.0}}}}
+</tool_call>
+"""
+    else:
+        prompt += """</tools>
+"""
+
+    prompt += """
 ## 单轮多动作 — 尽量在一个回合内输出多个动作
 
 强烈建议在单个回合中输出多个 `<tool_call>` 块，这是默认和推荐的操作方式。这样可以大幅减少回合数、加快任务完成速度，并避免回合间游戏状态重置。

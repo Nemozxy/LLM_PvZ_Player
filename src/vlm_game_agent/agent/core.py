@@ -13,7 +13,7 @@ from pynput import keyboard
 from vlm_game_agent.pause import PauseController
 from vlm_game_agent.vision import WindowCapture
 from vlm_game_agent.webui.manager import ConnectionManager
-from vlm_game_agent.pvz import PvZMemory, PvZStateReader
+from vlm_game_agent.pvz import PvZExecutor, PvZMemory, PvZStateReader
 
 from .executor import ActionExecutor
 from .llm import VLMClient
@@ -92,6 +92,12 @@ class GameAgent:
             "left_click_drag": delay_drag,
             "key": delay_key,
             "type": delay_type,
+            # PvZ 专用动作延迟
+            "place_plant": delay_click,
+            "shovel": delay_click,
+            "collect_sun": delay_click,
+            "click_card": delay_click,
+            "use_cob_cannon": delay_click,
         }
         self._delay_idle = delay_idle
 
@@ -107,6 +113,7 @@ class GameAgent:
             logger.info("[Agent] PvZ 内存读取已启用: {}", self._pvz_memory.version_name)
 
         self._executor: ActionExecutor | None = None
+        self._pvz_executor: PvZExecutor | None = None
         self._history: list[dict[str, Any]] = []
         self._running = False
         self._stop_listener: keyboard.Listener | None = None
@@ -137,6 +144,14 @@ class GameAgent:
         self._executor = ActionExecutor(
             get_window_client_rect=self._get_client_rect,
         )
+
+        # 初始化 PvZ 执行器（如果已连接 PvZ 内存）
+        if self._pvz_memory and self._pvz_memory.is_connected():
+            self._pvz_executor = PvZExecutor(
+                memory=self._pvz_memory,
+                get_client_rect=self._get_client_rect,
+            )
+            logger.info("[Agent] PvZ 执行器已初始化")
 
         # 加载记忆
         memory_text = self.memory.load()
@@ -275,7 +290,11 @@ class GameAgent:
                     self._notify_webui("log", f"Agent 回答: {text}", "info")
                     continue
 
-                result = self._executor.execute(action, tc.arguments)
+                # 判断是否为 PvZ 专属动作，分派到对应执行器
+                if tc.name == "pvz_action" and self._pvz_executor and self._pvz_reader:
+                    result = self._execute_pvz_action(action, tc.arguments)
+                else:
+                    result = self._executor.execute(action, tc.arguments)
                 execution_results.append(result)
                 self._notify_webui("action", action, str(tc.arguments))
 
@@ -515,6 +534,27 @@ class GameAgent:
         except Exception as exc:
             logger.warning("[Agent] PvZ 状态读取失败: {}", exc)
             return ""
+
+    def _execute_pvz_action(self, action: str, args: dict[str, Any]) -> dict[str, Any]:
+        """执行 PvZ 专属动作，需要先读取最新游戏状态.
+
+        Args:
+            action: PvZ 动作名称 (place_plant / shovel / collect_sun / ...).
+            args: 动作参数。
+
+        Returns:
+            执行结果字典。
+        """
+        if not self._pvz_executor or not self._pvz_reader:
+            return {"action": action, "status": "error", "error": "PvZ 执行器未初始化"}
+
+        # 读取最新游戏状态供执行器使用
+        try:
+            state = self._pvz_reader.read_state()
+        except Exception as exc:
+            return {"action": action, "status": "error", "error": f"读取游戏状态失败: {exc}"}
+
+        return self._pvz_executor.execute(action, args, state)
     def _get_client_rect(self) -> tuple[int, int, int, int]:
         """返回窗口客户区屏幕坐标 (left, top, right, bottom)."""
         # 复用 capture 中的客户区计算逻辑
