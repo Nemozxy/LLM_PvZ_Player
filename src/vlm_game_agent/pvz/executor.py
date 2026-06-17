@@ -261,7 +261,8 @@ class PvZExecutor:
             raise ValueError("shovel 需要 row, col 参数")
 
         if self._injector:
-            # 注入模式: 用游戏内部精确坐标
+            # 注入模式: 先释放鼠标选中状态，再用游戏内部精确坐标铲除
+            self._injector.release_mouse()
             gx, gy = self._injector.grid_to_pixel(row, col)
             logger.info("[PvZ执行] 💉 ShovelPlant ({},{}) game({},{})", row, col, gx, gy)
             self._injector.shovel(gx, gy)

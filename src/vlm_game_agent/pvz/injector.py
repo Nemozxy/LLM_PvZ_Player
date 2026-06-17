@@ -81,6 +81,10 @@ FUNC_MOUSE_DOWN = 0x539390
 # MouseUp: push key, push x, eax=MouseWindow*, ebx=y
 FUNC_MOUSE_UP = 0x5392E0
 
+# ReleaseMouse — 释放鼠标选中状态 (如取消卡片选中)
+# 调用约定: eax = Board*, 无参数
+FUNC_RELEASE_MOUSE = 0x40CD80
+
 # GridToAbscissa(row, col) → x 像素坐标
 # ECX = Board*, EAX = col, ESI = row
 FUNC_GRID_TO_ABSCISSA = 0x41C680
@@ -572,6 +576,26 @@ class PvZCodeInjector:
         code = _build_mouse_click_code(x, y, button)
         self._inject_and_execute(bytes(code))
         time.sleep(0.05)
+
+    def release_mouse(self) -> None:
+        """释放游戏鼠标选中状态.
+
+        当卡片处于选中状态时（如种植物后卡片仍高亮），调用此方法取消选中。
+        AvZ 在铲除前也会先调用 ReleaseMouse。
+        调用约定: eax = Board*, 无参数。
+        """
+        code = bytearray()
+        # mov eax, [PVZ_BASE]
+        code += b'\xA1' + struct.pack('<I', PVZ_BASE)
+        # mov eax, [eax + BOARD_OFFSET]  ; eax = Board*
+        code += b'\x8B\x80' + struct.pack('<I', BOARD_OFFSET)
+        # mov edx, FUNC_RELEASE_MOUSE
+        code += b'\xBA' + struct.pack('<I', FUNC_RELEASE_MOUSE)
+        # call edx
+        code += b'\xFF\xD2'
+        # ret
+        code += b'\xC3'
+        self._inject_and_execute(bytes(code))
 
     def grid_to_pixel(self, row: int, col: int) -> tuple[int, int]:
         """调用游戏内部 GridToAbscissa/Ordinate 获取格子中心像素坐标.
