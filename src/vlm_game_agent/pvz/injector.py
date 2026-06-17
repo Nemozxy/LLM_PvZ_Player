@@ -421,7 +421,7 @@ class PvZCodeInjector:
         用于 hack 机制: 修改游戏代码段中的指令字节。
         """
         handle = self._inject_handle
-        written = wintypes.SIZE_T(0)
+        written = ctypes.c_size_t(0)
         success = _WriteProcessMemory(
             handle,
             ctypes.c_void_p(addr),
@@ -475,7 +475,7 @@ class PvZCodeInjector:
 
         try:
             # 写入 shellcode
-            written = wintypes.SIZE_T(0)
+            written = ctypes.c_size_t(0)
             if not _WriteProcessMemory(
                 handle, ctypes.c_void_p(code_addr),
                 code, code_size,
