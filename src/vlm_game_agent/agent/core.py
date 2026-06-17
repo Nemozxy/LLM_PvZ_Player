@@ -114,6 +114,7 @@ class GameAgent:
 
         self._executor: ActionExecutor | None = None
         self._pvz_executor: PvZExecutor | None = None
+        self._last_execution_results: list[dict[str, Any]] = []
         self._history: list[dict[str, Any]] = []
         self._running = False
         self._stop_listener: keyboard.Listener | None = None
@@ -334,6 +335,7 @@ class GameAgent:
 
             # 记录本轮结束时间，供下轮计算间隔
             self._last_turn_time = time.perf_counter()
+            self._last_execution_results = execution_results
 
         logger.info("[Agent] 任务结束")
         self._notify_webui("log", "任务结束", "info")
@@ -457,7 +459,7 @@ class GameAgent:
         time_hint = f"[当前截图，距上一轮 {elapsed:.1f} 秒]"
 
         # 注入上一轮操作摘要，让模型有持续性记忆
-        last_turn_summary = self._build_last_turn_summary()
+        last_turn_summary = self._build_last_turn_summary(execution_results=self._last_execution_results)
 
         # 注入 PvZ 内存读取的游戏状态
         game_state_text = self._read_pvz_state()
@@ -534,6 +536,32 @@ class GameAgent:
         except Exception as exc:
             logger.warning("[Agent] PvZ 状态读取失败: {}", exc)
             return ""
+
+    def _build_last_turn_summary(self, execution_results: list[dict[str, Any]] | None = None) -> str:
+        """构建上一轮操作摘要，帮助模型保持持续性记忆.
+
+        Args:
+            execution_results: 上一轮的执行结果列表。
+
+        Returns:
+            摘要文本，无操作时返回空字符串。
+        """
+        results = execution_results or self._last_execution_results
+        if not results:
+            return ""
+
+        parts: list[str] = ["[上轮操作]"]
+        for r in results:
+            action = r.get("action", "?")
+            status = r.get("status", "?")
+            detail = r.get("detail", "")
+            if status == "error":
+                parts.append(f"  {action}: 失败 - {r.get('error', '未知')}")
+            elif detail:
+                parts.append(f"  {action}: {detail}")
+            else:
+                parts.append(f"  {action}: {status}")
+        return "\n".join(parts)
 
     def _execute_pvz_action(self, action: str, args: dict[str, Any]) -> dict[str, Any]:
         """执行 PvZ 专属动作，需要先读取最新游戏状态.
