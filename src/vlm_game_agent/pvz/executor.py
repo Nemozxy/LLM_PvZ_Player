@@ -1,112 +1,78 @@
-"""PvZ 专用动作执行器 — 高层游戏动作到精确鼠标点击的映射.
+"""PvZ 专用动作执行器 — 高层游戏动作到注入/鼠标的映射.
 
-将 place_plant/shovel/collect_sun 等语义化动作，
-利用内存读取的卡片坐标和格子→像素映射，转为精确的屏幕点击。
+执行策略:
+- 代码注入 (PvZCodeInjector): 直接调用游戏内部函数，100% 可靠
+- 鼠标操作 (fallback): 仅在注入器不可用时使用，不可靠
 
 坐标体系:
-- 卡片位置: 从内存读取 (SeedInfo.x/y/width/height)，即游戏内像素坐标
-- 格子位置: 通过 row/col + 场景类型计算得到游戏内像素坐标
-- 屏幕坐标: 游戏内坐标 → 窗口偏移 → 屏幕绝对坐标
+- 注入模式: 传入 row/col 给游戏函数，游戏内部处理坐标
+- 鼠标模式: 通过 row/col + 场景类型 → 游戏像素坐标 → 屏幕坐标
 """
 
 from __future__ import annotations
 
+import ctypes
 import time
 from typing import Any, Callable
 
 import pyautogui
 from loguru import logger
 
+from .injector import PvZCodeInjector
 from .memory import PvZMemory
-from .offsets import SceneType
 from .reader import GameState, SeedInfo
 
+# Windows API (鼠标 fallback 用)
+_MOUSEEVENTF_LEFTDOWN = 0x0002
+_MOUSEEVENTF_LEFTUP = 0x0004
+
+
+def _win_click(x: int, y: int, move_duration: float = 0.3) -> None:
+    """用 Windows API 移动鼠标并点击 (鼠标 fallback 用)."""
+    from_x, from_y = pyautogui.position()
+    steps = max(1, int(move_duration / 0.02))
+    for i in range(1, steps + 1):
+        t = i / steps
+        cur_x = int(from_x + (x - from_x) * t)
+        cur_y = int(from_y + (y - from_y) * t)
+        ctypes.windll.user32.SetCursorPos(cur_x, cur_y)
+        time.sleep(0.02)
+    time.sleep(0.03)
+    ctypes.windll.user32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    time.sleep(0.05)
+    ctypes.windll.user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
 
 # ================================================================== #
-#  格子 → 游戏内像素坐标映射
+#  格子 → 游戏内像素坐标 (鼠标 fallback 用，注入模式不需要)
 # ================================================================== #
-#
-# 坐标系说明 (来自 AsmVsZombies / pvztoolkit 逆向):
-# - x 坐标: col * 80 (简单线性，每列 80 像素)
-# - y 坐标: 由游戏内部函数 GridToOrdinate(row, col) 计算，
-#           不同场景有不同的行高和基线，屋顶场景还有斜坡偏移。
-#           我们用近似值代替，对于点击植物格子来说足够精确。
-#
-# 行数: 白天/黑夜/屋顶/月夜 = 5 行 (row 0~4)
-#        泳池/雾夜 = 6 行 (row 0~5)
-# 列数: 统一 9 列 (col 0~8)
-#
-# 参考: AsmVsZombies avz_click.cpp AGridToCoordinate()
-#        AvZLib AverageSpawn.h baseY/height 参数
 
-# 铲子按钮在游戏内的大致位置 (800x600 基准)
-# 铲子图标位于卡槽栏右上方，约 x=400, y=8
-# 注意: 这是一个近似值，实际位置可能因卡片数量不同而偏移
+COL_WIDTH = 80
+PVZ_STANDARD_WIDTH = 800
+PVZ_STANDARD_HEIGHT = 600
 SHOVEL_X = 400
 SHOVEL_Y = 8
 
-# 列 x 坐标: col * 80 (来自 AsmVsZombies avz_click.cpp 第49行)
-COL_WIDTH = 80
-
-# PvZ 窗口标准客户区尺寸
-PVZ_STANDARD_WIDTH = 800
-PVZ_STANDARD_HEIGHT = 600
-
 
 def _grid_y_by_scene(row: int, scene: int) -> int:
-    """根据场景类型计算格子中心的 y 坐标 (800x600 基准).
-
-    近似值，来自 AvZLib AverageSpawn.h 的 baseY/height 参数:
-    - 白天/黑夜: baseY=50, rowHeight=100
-    - 泳池/雾夜: baseY=50, rowHeight=85
-    - 屋顶/月夜: baseY=40, rowHeight=85 (屋顶有斜坡，首行更高)
-
-    这些是 1-indexed 僵尸 ordinate 值。
-    格子中心 ≈ ordinate + rowHeight/2，但实际 AvZ 点击用 +40。
-    我们直接用查表法返回格子中心 y。
-    """
+    """根据场景类型近似计算格子中心的 y 坐标 (800x600 基准)."""
     if scene in (2, 3):
-        # 泳池/雾夜: 6行, baseY=50, height=85
-        # 行0中心 y ≈ 50 + 0*85 + 42 = 92  → 实际约 92
-        # 行5中心 y ≈ 50 + 5*85 + 42 = 517
         return 50 + row * 85 + 42
     elif scene in (4, 5):
-        # 屋顶/月夜: 5行, baseY=40, height=85
-        # 但屋顶有斜坡，实际行高不均匀
-        # 近似值，精确需要调用游戏内部 GridToOrdinate
         return 40 + row * 85 + 42
     else:
-        # 白天/黑夜: 5行, baseY=50, height=100
-        # 行0中心 y ≈ 50 + 0*100 + 50 = 100
-        # 行4中心 y ≈ 50 + 4*100 + 50 = 500
-        return 50 + row * 100 + 50
+        return 50 + row * 100 + 40
 
 
-def grid_to_game_pixel(
-    row: int,
-    col: int,
-    scene: int = 0,
-) -> tuple[int, int]:
-    """将 (行, 列) 转换为游戏内像素坐标 (格子中心).
+def grid_to_game_pixel(row: int, col: int, scene: int = 0) -> tuple[int, int]:
+    """将 (行, 列) 转换为游戏内像素坐标 (鼠标 fallback 用).
 
-    Args:
-        row: 行号。白天/黑夜/屋顶 0~4，泳池/雾夜 0~5。
-        col: 列号 0~8。
-        scene: 场景类型 (0=白天 1=黑夜 2=泳池 3=雾夜 4=天台 5=月夜)
-
-    Returns:
-        (x, y) 游戏内像素坐标 (800x600 基准)
+    注入模式下应使用 injector.grid_to_pixel() 调用游戏内部函数获取精确坐标。
     """
-    # x: 列号 * 80 (来自 AsmVsZombies avz_click.cpp: x = int(col * 80.0 + 0.5))
-    x = col * COL_WIDTH
-
-    # y: 根据场景查表
+    x = (col + 1) * COL_WIDTH
     y = _grid_y_by_scene(row, scene)
-
-    # 边界裁剪
     x = max(0, min(799, x))
     y = max(0, min(599, y))
-
     return x, y
 
 
@@ -115,27 +81,13 @@ def game_pixel_to_screen(
     gy: int,
     get_client_rect: Callable[[], tuple[int, int, int, int]],
 ) -> tuple[int, int]:
-    """将游戏内像素坐标 (800x600 基准) 转换为屏幕绝对坐标.
-
-    Args:
-        gx: 游戏内 x 坐标
-        gy: 游戏内 y 坐标
-        get_client_rect: 返回窗口客户区屏幕坐标的回调
-
-    Returns:
-        (screen_x, screen_y) 屏幕绝对坐标
-    """
+    """将游戏内像素坐标 (800x600 基准) 转换为屏幕绝对坐标 (鼠标 fallback 用)."""
     left, top, right, bottom = get_client_rect()
     cw = right - left
     ch = bottom - top
-
-    # 按窗口实际大小缩放
     scale_x = cw / PVZ_STANDARD_WIDTH
     scale_y = ch / PVZ_STANDARD_HEIGHT
-
-    screen_x = int(left + gx * scale_x)
-    screen_y = int(top + gy * scale_y)
-    return screen_x, screen_y
+    return int(left + gx * scale_x), int(top + gy * scale_y)
 
 
 # ================================================================== #
@@ -145,10 +97,7 @@ def game_pixel_to_screen(
 class PvZExecutor:
     """PvZ 专用动作执行器.
 
-    处理 place_plant / shovel / collect_sun 等高层动作，
-    利用内存数据精确计算点击位置。
-
-    通用动作 (left_click / wait / key 等) 仍由 ActionExecutor 处理。
+    优先使用代码注入，鼠标操作仅作为不可靠的后备。
     """
 
     def __init__(
@@ -159,6 +108,26 @@ class PvZExecutor:
         self._mem = memory
         self._get_rect = get_client_rect
 
+        # 初始化代码注入器
+        self._injector: PvZCodeInjector | None = None
+        if memory.is_connected():
+            try:
+                self._injector = PvZCodeInjector(memory)
+                logger.info("[PvZ执行] 代码注入器已启用")
+            except Exception as exc:
+                logger.warning("[PvZ执行] 代码注入器初始化失败: {}，退回鼠标模式", exc)
+
+    def close(self) -> None:
+        """释放资源."""
+        if self._injector:
+            self._injector.close()
+            self._injector = None
+
+    @property
+    def injector(self) -> PvZCodeInjector | None:
+        """获取注入器实例（用于外部调用 hack 开关等）."""
+        return self._injector
+
     def can_execute(self, action: str) -> bool:
         """判断是否为 PvZ 专属动作."""
         return action in (
@@ -167,16 +136,7 @@ class PvZExecutor:
         )
 
     def execute(self, action: str, args: dict[str, Any], state: GameState) -> dict[str, Any]:
-        """执行 PvZ 专属动作.
-
-        Args:
-            action: 动作名称。
-            args: 动作参数。
-            state: 当前游戏状态（用于获取卡片坐标等）。
-
-        Returns:
-            执行结果字典。
-        """
+        """执行 PvZ 专属动作."""
         logger.info("[PvZ执行] action={}, args={}", action, args)
         result: dict[str, Any] = {"action": action, "status": "ok"}
 
@@ -205,13 +165,7 @@ class PvZExecutor:
     # ------------------------------------------------------------------ #
 
     def _place_plant(self, args: dict, state: GameState, result: dict) -> None:
-        """种植植物: 先点击卡片，再点击目标格子.
-
-        参数:
-            card_index: 卡片槽位号 (0-based, 与游戏状态中卡片编号一致)
-            row: 目标行 (0-based)
-            col: 目标列 (0-based)
-        """
+        """种植植物."""
         card_index = args.get("card_index")
         row = args.get("row")
         col = args.get("col")
@@ -219,7 +173,6 @@ class PvZExecutor:
         if card_index is None or row is None or col is None:
             raise ValueError("place_plant 需要 card_index, row, col 参数")
 
-        # 验证卡片
         if card_index < 0 or card_index >= len(state.seeds):
             raise ValueError(f"无效卡片序号: {card_index}，共 {len(state.seeds)} 张卡")
 
@@ -227,25 +180,39 @@ class PvZExecutor:
         if not seed.is_ready:
             raise ValueError(f"卡片 [{card_index}] {seed.name} 未就绪 (冷却中或不可用)")
 
-        # 1. 点击卡片
-        self._click_seed_card(seed)
-        time.sleep(0.1)
+        plant_type = seed.plant_type
+        if seed.imitator_type >= 0:
+            plant_type = seed.imitator_type
+            imitater = True
+        else:
+            imitater = False
 
-        # 2. 点击目标格子
-        gx, gy = grid_to_game_pixel(row, col, state.scene)
-        sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
-        pyautogui.click(sx, sy)
+        if self._injector:
+            logger.info("[PvZ执行] 💉 PutPlant row={}, col={}, type={}, imitater={}",
+                       row, col, plant_type, imitater)
+            self._injector.put_plant(row, col, plant_type, imitater)
+        else:
+            self._place_plant_mouse(seed, row, col, state)
 
         result["detail"] = f"种植 {seed.name} 到 行{row}列{col}"
         result["card_index"] = card_index
         result["grid"] = (row, col)
 
-    def _click_card(self, args: dict, state: GameState, result: dict) -> None:
-        """点击卡片 (选中但暂不放置).
+    def _place_plant_mouse(self, seed: SeedInfo, row: int, col: int, state: GameState) -> None:
+        """鼠标模式种植（不可靠的后备）."""
+        cx, cy = self._seed_center(seed)
+        logger.info("[PvZ执行] 🖱 点击卡片 [{}] 屏幕({},{})", seed.index, cx, cy)
+        _win_click(cx, cy)
+        time.sleep(0.3)
 
-        参数:
-            card_index: 卡片槽位号 (0-based)
-        """
+        gx, gy = grid_to_game_pixel(row, col, state.scene)
+        sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
+        logger.info("[PvZ执行] 🖱 点击格子 ({},{}) 屏幕({},{})", row, col, sx, sy)
+        _win_click(sx, sy, move_duration=0.4)
+        time.sleep(0.2)
+
+    def _click_card(self, args: dict, state: GameState, result: dict) -> None:
+        """点击卡片 (选中但暂不放置)."""
         card_index = args.get("card_index")
         if card_index is None:
             raise ValueError("click_card 需要 card_index 参数")
@@ -254,54 +221,66 @@ class PvZExecutor:
             raise ValueError(f"无效卡片序号: {card_index}")
 
         seed = state.seeds[card_index]
-        self._click_seed_card(seed)
+
+        if self._injector:
+            # 注入模式: 用 MouseClick 点击卡片中心坐标
+            if seed.x > 0 and seed.y > 0:
+                cx = seed.x + seed.width // 2
+                cy = seed.y + seed.height // 2
+                self._injector.mouse_click(cx, cy)
+            else:
+                # 兜底估算
+                cx = 80 + seed.index * 51 + 25
+                cy = 10
+                self._injector.mouse_click(cx, cy)
+        else:
+            sx, sy = self._seed_center(seed)
+            _win_click(sx, sy)
 
         result["detail"] = f"选中卡片 [{card_index}] {seed.name}"
 
     def _shovel(self, args: dict, state: GameState, result: dict) -> None:
-        """铲除植物: 先点击铲子按钮，再点击目标格子.
-
-        参数:
-            row: 目标行 (0-based)
-            col: 目标列 (0-based)
-        """
+        """铲除植物."""
         row = args.get("row")
         col = args.get("col")
         if row is None or col is None:
             raise ValueError("shovel 需要 row, col 参数")
 
-        # 1. 点击铲子按钮
-        sx, sy = game_pixel_to_screen(SHOVEL_X, SHOVEL_Y, self._get_rect)
-        pyautogui.click(sx, sy)
-        time.sleep(0.1)
-
-        # 2. 点击目标格子
-        gx, gy = grid_to_game_pixel(row, col, state.scene)
-        sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
-        pyautogui.click(sx, sy)
+        if self._injector:
+            # 注入模式: 用游戏内部精确坐标
+            gx, gy = self._injector.grid_to_pixel(row, col)
+            logger.info("[PvZ执行] 💉 ShovelPlant ({},{}) game({},{})", row, col, gx, gy)
+            self._injector.shovel(gx, gy)
+        else:
+            sx, sy = game_pixel_to_screen(SHOVEL_X, SHOVEL_Y, self._get_rect)
+            _win_click(sx, sy)
+            time.sleep(0.25)
+            gx, gy = grid_to_game_pixel(row, col, state.scene)
+            sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
+            _win_click(sx, sy, move_duration=0.4)
 
         result["detail"] = f"铲除 行{row}列{col} 的植物"
         result["grid"] = (row, col)
 
     def _collect_sun(self, args: dict, state: GameState, result: dict) -> None:
-        """收集阳光: 点击场上的阳光.
-
-        参数:
-            index: 阳光在收集物列表中的序号 (0-based)
-              或 "all" 收集所有阳光
-        """
+        """收集阳光."""
         index = args.get("index", 0)
 
         if index == "all":
-            # 收集所有阳光
             sun_items = [it for it in state.items if it.is_sun and not it.is_collected]
-            count = 0
-            for it in sun_items[:5]:  # 最多一次收 5 个，避免耗时
-                gx, gy = int(it.x), int(it.y)
-                sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
-                pyautogui.click(sx, sy)
-                count += 1
-                time.sleep(0.05)
+            if not sun_items:
+                result["detail"] = "没有可收集的阳光"
+                return
+            if self._injector:
+                coords = [(int(it.x), int(it.y)) for it in sun_items]
+                count = self._injector.collect_all_sun(coords)
+            else:
+                count = 0
+                for it in sun_items[:5]:
+                    sx, sy = game_pixel_to_screen(int(it.x), int(it.y), self._get_rect)
+                    _win_click(sx, sy, move_duration=0.15)
+                    count += 1
+                    time.sleep(0.08)
             result["detail"] = f"收集了 {count} 个阳光"
         else:
             sun_items = [it for it in state.items if it.is_sun and not it.is_collected]
@@ -309,20 +288,15 @@ class PvZExecutor:
                 raise ValueError("当前没有可收集的阳光")
             idx = min(int(index), len(sun_items) - 1)
             it = sun_items[idx]
-            gx, gy = int(it.x), int(it.y)
-            sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
-            pyautogui.click(sx, sy)
-            result["detail"] = f"收集阳光 (位置: {gx},{gy})"
+            if self._injector:
+                self._injector.collect_sun_at(int(it.x), int(it.y))
+            else:
+                sx, sy = game_pixel_to_screen(int(it.x), int(it.y), self._get_rect)
+                _win_click(sx, sy, move_duration=0.2)
+            result["detail"] = f"收集阳光 ({int(it.x)},{int(it.y)})"
 
     def _use_cob_cannon(self, args: dict, state: GameState, result: dict) -> None:
-        """使用玉米加农炮: 先点击炮台，再点击落点.
-
-        参数:
-            row: 炮台所在行 (0-based)
-            col: 炮台所在列 (0-based)
-            target_row: 落点行 (0-based)
-            target_col: 落点列 (0-based)
-        """
+        """使用玉米加农炮: 先点击炮台，再点击落点."""
         row = args.get("row")
         col = args.get("col")
         target_row = args.get("target_row")
@@ -331,16 +305,21 @@ class PvZExecutor:
         if any(v is None for v in (row, col, target_row, target_col)):
             raise ValueError("use_cob_cannon 需要 row, col, target_row, target_col 参数")
 
-        # 1. 点击炮台
-        gx, gy = grid_to_game_pixel(row, col, state.scene)
-        sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
-        pyautogui.click(sx, sy)
-        time.sleep(0.15)
-
-        # 2. 点击落点
-        gx, gy = grid_to_game_pixel(target_row, target_col, state.scene)
-        sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
-        pyautogui.click(sx, sy)
+        if self._injector:
+            # 注入模式: 精确坐标点击
+            gx1, gy1 = self._injector.grid_to_pixel(row, col)
+            self._injector.mouse_click(gx1, gy1)
+            time.sleep(0.1)
+            gx2, gy2 = self._injector.grid_to_pixel(target_row, target_col)
+            self._injector.mouse_click(gx2, gy2)
+        else:
+            gx, gy = grid_to_game_pixel(row, col, state.scene)
+            sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
+            _win_click(sx, sy)
+            time.sleep(0.15)
+            gx, gy = grid_to_game_pixel(target_row, target_col, state.scene)
+            sx, sy = game_pixel_to_screen(gx, gy, self._get_rect)
+            _win_click(sx, sy)
 
         result["detail"] = f"玉米炮 ({row},{col}) → ({target_row},{target_col})"
 
@@ -348,20 +327,12 @@ class PvZExecutor:
     #  内部工具
     # ------------------------------------------------------------------ #
 
-    def _click_seed_card(self, seed: SeedInfo) -> None:
-        """点击一张种子卡片.
-
-        利用内存中读取的卡片 x/y/width/height 计算精确点击位置。
-        """
+    def _seed_center(self, seed: SeedInfo) -> tuple[int, int]:
+        """计算卡片中心屏幕坐标 (鼠标 fallback 用)."""
         if seed.x > 0 and seed.y > 0 and seed.width > 0 and seed.height > 0:
-            # 使用内存中的精确坐标
             cx = seed.x + seed.width // 2
             cy = seed.y + seed.height // 2
         else:
-            # 兜底：按卡片序号估算位置
-            # 卡片区起始 x ≈ 80，每张卡宽 ≈ 50，间距 ≈ 1
             cx = 80 + seed.index * 51 + 25
             cy = 10
-
-        sx, sy = game_pixel_to_screen(cx, cy, self._get_rect)
-        pyautogui.click(sx, sy)
+        return game_pixel_to_screen(cx, cy, self._get_rect)

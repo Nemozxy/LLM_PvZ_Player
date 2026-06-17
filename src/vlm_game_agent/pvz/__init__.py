@@ -45,6 +45,14 @@ from .reader import (
     ZombieInfo,
 )
 from .executor import PvZExecutor
+from .injector import (
+    HACK_AUTO_COLLECTED,
+    HACK_BLOCK_MAIN_LOOP,
+    HACK_PLACED_ANYWHERE,
+    HACK_UNLOCK_SUN_LIMIT,
+    HackInfo,
+    PvZCodeInjector,
+)
 
 __all__ = [
     # 核心
@@ -77,4 +85,11 @@ __all__ = [
     "LawnMowerInfo",
     # 执行器
     "PvZExecutor",
+    # 注入器
+    "PvZCodeInjector",
+    "HackInfo",
+    "HACK_BLOCK_MAIN_LOOP",
+    "HACK_AUTO_COLLECTED",
+    "HACK_UNLOCK_SUN_LIMIT",
+    "HACK_PLACED_ANYWHERE",
 ]
