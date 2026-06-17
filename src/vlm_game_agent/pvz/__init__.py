@@ -44,6 +44,7 @@ from .reader import (
     SeedInfo,
     ZombieInfo,
 )
+from .executor import PvZExecutor
 
 __all__ = [
     # 核心
@@ -74,4 +75,6 @@ __all__ = [
     "ItemInfo",
     "GridItemInfo",
     "LawnMowerInfo",
+    # 执行器
+    "PvZExecutor",
 ]
