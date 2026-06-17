@@ -12,11 +12,13 @@ from loguru import logger
 from pynput import keyboard
 
 from vlm_game_agent.agent import GameAgent
+from vlm_game_agent.agent.action_logger import ActionLogger
 from vlm_game_agent.agent.compressor import ContextCompressor
 from vlm_game_agent.agent.llm import VLMClient
 from vlm_game_agent.agent.memory import MemoryManager
 from vlm_game_agent.config.settings import Settings
 from vlm_game_agent.pause import PauseController
+from vlm_game_agent.pvz import PvZMemory
 from vlm_game_agent.vision import CaptureConfig, WindowCapture
 from vlm_game_agent.webui.server import WebUIServer
 
@@ -55,12 +57,15 @@ def main() -> None:
     settings = Settings()
 
     # 1. 截图器
+    # 软暂停时不需要截图模块切前台（软暂停自己会切前台并按暂停键）
+    # 避免切前台触发游戏自动暂停，导致截图包含暂停菜单
     cap = WindowCapture(
         config=CaptureConfig(
             scale=settings.capture_scale,
             output_format=settings.capture_format,
             target_fps=settings.capture_fps,
             capture_area=settings.capture_area,
+            ensure_foreground=settings.pause_strategy != "soft",
         )
     )
 
@@ -130,7 +135,23 @@ def main() -> None:
         compress_threshold=settings.agent_context_compress_threshold,
     )
 
-    # 7. 创建 Agent
+    # 7. 操作日志记录器
+    action_logger = None
+    if settings.action_log_enabled:
+        action_logger = ActionLogger(settings.action_log_dir)
+        print(f"操作日志: {settings.action_log_dir}")
+
+    # 8. PvZ 内存读取（可选，需要 PvZ 游戏运行中）
+    pvz_memory = None
+    if settings.pvz_memory_enabled:
+        pvz_memory = PvZMemory()
+        if pvz_memory.connect():
+            print(f"PvZ 内存读取已启用: {pvz_memory.version_name}")
+        else:
+            print("PvZ 内存读取连接失败（将使用纯视觉模式）")
+            pvz_memory = None
+
+    # 9. 创建 Agent
     stop_hotkey = parse_stop_hotkey(settings.agent_stop_hotkey)
     agent = GameAgent(
         capture=cap,
@@ -147,7 +168,9 @@ def main() -> None:
         delay_type=settings.agent_delay_type,
         delay_idle=settings.agent_delay_idle,
         compressor=compressor,
+        action_logger=action_logger,
         stop_hotkey=stop_hotkey,
+        pvz_memory=pvz_memory,
     )
 
     # 7. 任务目标：配置优先，否则交互输入
