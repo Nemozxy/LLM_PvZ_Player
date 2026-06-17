@@ -378,6 +378,9 @@ class PvZCodeInjector:
         # hack 状态跟踪
         self._active_hacks: dict[str, bool] = {}
 
+        # 默认开启自动收集阳光 — Agent 模式下无需手动点阳光
+        self.set_auto_collect(True)
+
         logger.info("[注入器] 初始化成功，注入句柄=0x{:X}", handle)
 
     def close(self) -> None:
