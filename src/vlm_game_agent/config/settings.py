@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # ========== 记忆系统 ==========
     memory_dir: str = "./memories"
 
+    # ========== 操作日志 ==========
+    action_log_enabled: bool = True
+    action_log_dir: str = "./action_logs"
+
     # ========== WebUI ==========
     webui_enabled: bool = True
     webui_host: str = "0.0.0.0"
@@ -66,3 +70,6 @@ class Settings(BaseSettings):
     # 设置后跳过交互式输入，直接启动
     window_title: str = ""  # 窗口标题关键词
     task: str = ""          # 任务目标
+
+    # ========== PvZ 内存读取 ==========
+    pvz_memory_enabled: bool = False  # 启用 PvZ 内存读取模式
