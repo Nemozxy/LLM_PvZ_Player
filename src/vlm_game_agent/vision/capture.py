@@ -44,6 +44,9 @@ class CaptureConfig:
     activate_delay: float = 0.15
     # 截图范围: "window" 完整窗口外框(含标题栏边框，可能有毛边); "client" 仅客户区(纯内容)
     capture_area: str = "client"
+    # 截图前是否自动将窗口切到前台。
+    # 软暂停策略下应设为 False，避免切前台触发游戏自动暂停导致截图包含暂停菜单。
+    ensure_foreground: bool = True
 
 
 class WindowCapture:
@@ -130,8 +133,9 @@ class WindowCapture:
 
         if img is None:
             if self.config.capture_mode == "screen":
-                self._ensure_foreground()
-                time.sleep(self.config.activate_delay)
+                if self.config.ensure_foreground:
+                    self._ensure_foreground()
+                    time.sleep(self.config.activate_delay)
             img = self._capture_screen()
             logger.debug("[窗口捕获] 屏幕截图完成")
 

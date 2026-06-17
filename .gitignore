@@ -1,6 +1,11 @@
 # Trae
 .trae/
 
+# 参考项目
+reference_project/
+
+# 操作日志
+action_logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
