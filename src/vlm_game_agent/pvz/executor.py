@@ -254,18 +254,30 @@ class PvZExecutor:
         result["detail"] = f"选中卡片 [{card_index}] {seed.name}"
 
     def _shovel(self, args: dict, state: GameState, result: dict) -> None:
-        """铲除植物."""
+        """铲除植物 — MouseClick 点铲子按钮 + 点目标格子.
+
+        走 MouseClick 路线让游戏自己处理铲子的 UI 逻辑（选中/取消/教程等），
+        跟种植物一样避免绕过 UI 产生副作用。
+        """
         row = args.get("row")
         col = args.get("col")
         if row is None or col is None:
             raise ValueError("shovel 需要 row, col 参数")
 
         if self._injector:
-            # 注入模式: 先释放鼠标选中状态，再用游戏内部精确坐标铲除
+            # 1. 先释放当前鼠标选中状态
             self._injector.release_mouse()
+
+            # 2. 点击铲子按钮
+            shovel_x, shovel_y = self._get_shovel_button_pos(state)
+            logger.info("[PvZ执行] 💉 点击铲子 ({},{})", shovel_x, shovel_y)
+            self._injector.mouse_click(shovel_x, shovel_y)
+            time.sleep(0.1)
+
+            # 3. 点击目标格子
             gx, gy = self._injector.grid_to_pixel(row, col)
-            logger.info("[PvZ执行] 💉 ShovelPlant ({},{}) game({},{})", row, col, gx, gy)
-            self._injector.shovel(gx, gy)
+            logger.info("[PvZ执行] 💉 点击格子 ({},{}) → ({},{})", row, col, gx, gy)
+            self._injector.mouse_click(gx, gy)
         else:
             sx, sy = game_pixel_to_screen(SHOVEL_X, SHOVEL_Y, self._get_rect)
             _win_click(sx, sy)
@@ -341,6 +353,24 @@ class PvZExecutor:
     # ------------------------------------------------------------------ #
     #  内部工具
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _get_shovel_button_pos(state: GameState) -> tuple[int, int]:
+        """根据卡片位置推算铲子按钮中心坐标 (800x600 基准).
+
+        PvZ 工具栏布局: 阳光计数器 → 种子卡片 → 铲子按钮。
+        铲子按钮紧跟最后一张卡片右侧，y 与卡片对齐。
+        """
+        if state.seeds:
+            last = state.seeds[-1]
+            if last.x > 0 and last.width > 0:
+                # 卡片间距 50px，铲子按钮宽约 48px，距卡片约 10px
+                shovel_x = last.x + last.width + 10 + 24  # 卡片右边缘 + 间距 + 半宽
+                shovel_y = last.y + last.height // 2      # 垂直居中
+                return shovel_x, shovel_y
+
+        # 兜底: 10 张卡片时 x≈588, y≈43
+        return SHOVEL_X, SHOVEL_Y
 
     def _seed_center(self, seed: SeedInfo) -> tuple[int, int]:
         """计算卡片中心屏幕坐标 (鼠标 fallback 用)."""
