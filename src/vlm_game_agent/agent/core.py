@@ -339,6 +339,13 @@ class GameAgent:
 
         logger.info("[Agent] 任务结束")
         self._notify_webui("log", "任务结束", "info")
+        # 恢复所有 hack 并关闭注入句柄
+        if self._pvz_executor:
+            try:
+                self._pvz_executor.close()
+                logger.info("[Agent] PvZ 注入器已关闭，所有 hack 已恢复")
+            except Exception as exc:
+                logger.warning("[Agent] PvZ 注入器关闭失败: {}", exc)
         if self._action_logger:
             self._action_logger.close()
         self._cleanup_stop_listener()
@@ -355,6 +362,12 @@ class GameAgent:
                 self.pause.resume()
         except Exception as exc:
             logger.warning("[Agent] 恢复游戏失败: {}", exc)
+        # 恢复 hack 并关闭注入器
+        if self._pvz_executor:
+            try:
+                self._pvz_executor.close()
+            except Exception as exc:
+                logger.warning("[Agent] PvZ 注入器关闭失败: {}", exc)
         self._cleanup_stop_listener()
 
     def _start_stop_listener(self) -> None:
