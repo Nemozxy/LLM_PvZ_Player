@@ -165,7 +165,15 @@ class PvZExecutor:
     # ------------------------------------------------------------------ #
 
     def _place_plant(self, args: dict, state: GameState, result: dict) -> None:
-        """种植植物."""
+        """种植植物 — 点卡片选中 + 点格子放置.
+
+        注入模式: MouseClick 点击卡片中心 + MouseClick 点击格子中心
+        鼠标模式: Windows API 点击屏幕坐标
+
+        走 MouseClick 路线而非直接调 PutPlant，因为 PutPlant 绕过 UI 逻辑
+        （不扣阳光、不重置冷却、不检测占用），会产生大量副作用需要手动修补。
+        MouseClick 让游戏自己处理全部 UI 逻辑，零副作用。
+        """
         card_index = args.get("card_index")
         row = args.get("row")
         col = args.get("col")
@@ -180,17 +188,23 @@ class PvZExecutor:
         if not seed.is_ready:
             raise ValueError(f"卡片 [{card_index}] {seed.name} 未就绪 (冷却中或不可用)")
 
-        plant_type = seed.plant_type
-        if seed.imitator_type >= 0:
-            plant_type = seed.imitator_type
-            imitater = True
-        else:
-            imitater = False
-
         if self._injector:
-            logger.info("[PvZ执行] 💉 PutPlant row={}, col={}, type={}, imitater={}, cost={}",
-                       row, col, plant_type, imitater, seed.sun_cost)
-            self._injector.put_plant(row, col, plant_type, imitater, sun_cost=seed.sun_cost)
+            # 注入模式: MouseClick 点卡片 + 点格子
+            # 1. 点卡片中心
+            if seed.x > 0 and seed.y > 0:
+                card_cx = seed.x + seed.width // 2
+                card_cy = seed.y + seed.height // 2
+            else:
+                card_cx = 80 + seed.index * 51 + 25
+                card_cy = 10
+            logger.info("[PvZ执行] 💉 点击卡片 [{}] ({},{})", seed.index, card_cx, card_cy)
+            self._injector.mouse_click(card_cx, card_cy)
+            time.sleep(0.1)
+
+            # 2. 点格子中心 (精确坐标)
+            gx, gy = self._injector.grid_to_pixel(row, col)
+            logger.info("[PvZ执行] 💉 点击格子 ({},{}) → ({},{})", row, col, gx, gy)
+            self._injector.mouse_click(gx, gy)
         else:
             self._place_plant_mouse(seed, row, col, state)
 
