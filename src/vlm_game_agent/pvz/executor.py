@@ -188,9 +188,9 @@ class PvZExecutor:
             imitater = False
 
         if self._injector:
-            logger.info("[PvZ执行] 💉 PutPlant row={}, col={}, type={}, imitater={}",
-                       row, col, plant_type, imitater)
-            self._injector.put_plant(row, col, plant_type, imitater)
+            logger.info("[PvZ执行] 💉 PutPlant row={}, col={}, type={}, imitater={}, cost={}",
+                       row, col, plant_type, imitater, seed.sun_cost)
+            self._injector.put_plant(row, col, plant_type, imitater, sun_cost=seed.sun_cost)
         else:
             self._place_plant_mouse(seed, row, col, state)
 

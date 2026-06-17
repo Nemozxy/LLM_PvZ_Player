@@ -395,13 +395,13 @@ class PvZCodeInjector:
         """启用一个 hack: 将 hack_value 写入目标地址."""
         self._write_bytes(hack.addr, hack.hack_value)
         self._active_hacks[name] = True
-        logger.debug("[Hack] 启用 {} (0x{:X})", name, hack.addr)
+        logger.trace("[Hack] 启用 {} (0x{:X})", name, hack.addr)
 
     def disable_hack(self, name: str, hack: HackInfo) -> None:
         """禁用一个 hack: 将 reset_value 写回目标地址."""
         self._write_bytes(hack.addr, hack.reset_value)
         self._active_hacks.pop(name, None)
-        logger.debug("[Hack] 禁用 {} (0x{:X})", name, hack.addr)
+        logger.trace("[Hack] 禁用 {} (0x{:X})", name, hack.addr)
 
     def _disable_hack_by_name(self, name: str) -> None:
         """按名称禁用 hack (内部清理用)."""
@@ -418,7 +418,7 @@ class PvZCodeInjector:
     def _write_bytes(self, addr: int, data: bytes) -> None:
         """向 PvZ 进程指定地址写入字节.
 
-        用于 hack 机制: 修改游戏代码段中的指令字节。
+        用于 hack 机制和内存修改。
         """
         handle = self._inject_handle
         written = ctypes.c_size_t(0)
@@ -434,6 +434,13 @@ class PvZCodeInjector:
                 f"WriteProcessMemory 写入 0x{addr:X} 失败: "
                 f"written={written.value}/{len(data)}"
             )
+
+    def write_int(self, addr: int, value: int) -> None:
+        """向 PvZ 进程指定地址写入 32 位整数.
+
+        用于修改游戏数据（如阳光数量）。
+        """
+        self._write_bytes(addr, struct.pack('<i', value))
 
     # ------------------------------------------------------------------ #
     #  注入核心 — shellcode 执行
@@ -514,19 +521,29 @@ class PvZCodeInjector:
     #  高层动作接口
     # ------------------------------------------------------------------ #
 
-    def put_plant(self, row: int, col: int, plant_type: int, imitater: bool = False) -> None:
+    def put_plant(self, row: int, col: int, plant_type: int, imitater: bool = False,
+                  sun_cost: int = 0) -> None:
         """直接放置植物（不经过鼠标操作）.
+
+        注意: PutPlant 内部函数只创建植物对象，不扣除阳光。
+        如果需要扣阳光，传入 sun_cost 参数，会手动修改内存中的阳光值。
 
         Args:
             row: 行号 (0-based)。
             col: 列号 (0-based)。
             plant_type: 植物类型 ID（0=豌豆射手, 1=向日葵, ...）。
             imitater: 是否为模仿者。
+            sun_cost: 阳光消耗，0 表示不扣。
         """
-        logger.info("[注入] PutPlant row={}, col={}, type={}, imitater={}",
-                     row, col, plant_type, imitater)
+        logger.info("[注入] PutPlant row={}, col={}, type={}, imitater={}, cost={}",
+                     row, col, plant_type, imitater, sun_cost)
         code = _build_put_plant_code(row, col, plant_type, imitater)
         self._inject_and_execute(bytes(code))
+
+        # 手动扣除阳光（PutPlant 内部函数不走 UI 逻辑，不扣阳光）
+        if sun_cost > 0:
+            self._deduct_sun(sun_cost)
+
         time.sleep(0.05)
 
     def shovel(self, x: int, y: int) -> None:
@@ -561,8 +578,10 @@ class PvZCodeInjector:
 
         这比用公式近似计算更准确，特别是屋顶场景的斜坡偏移。
 
-        注意: GridToOrdinate 返回格子顶部 y, 需 +40 得到格子中心 (与 AvZ
-        AGridToCoordinate 一致: y = GridToOrdinate(row, col) + 40).
+        注意: GridToAbscissa/Ordinate 返回格子左上角坐标，需各 +40 得到
+        格子中心 (与 AvZ AGridToCoordinate 一致):
+            x = GridToAbscissa(row, col) + 40
+            y = GridToOrdinate(row, col) + 40
 
         Args:
             row: 行号 (0-based)。
@@ -584,7 +603,7 @@ class PvZCodeInjector:
         RESULT_Y_ADDR = PVZ_BASE + 0x904
 
         try:
-            x = self._mem.read_int(RESULT_X_ADDR)
+            x = self._mem.read_int(RESULT_X_ADDR) + 40  # 格子左边缘 → 格子中心
             y = self._mem.read_int(RESULT_Y_ADDR) + 40  # 格子顶部 → 格子中心
         except Exception:
             # 读取失败，用近似公式兜底
@@ -652,6 +671,25 @@ class PvZCodeInjector:
     # ------------------------------------------------------------------ #
     #  内部工具
     # ------------------------------------------------------------------ #
+
+    def _deduct_sun(self, cost: int) -> None:
+        """手动扣除阳光.
+
+        PutPlant 内部函数只创建植物对象，不走 UI 逻辑，不扣阳光。
+        阳光地址: [[PVZ_BASE] + BOARD_OFFSET] + sun_offset
+        """
+        try:
+            board_ptr = self._mem.read_pointer(PVZ_BASE + BOARD_OFFSET)
+            if board_ptr == 0:
+                logger.warning("[注入] Board* 为空，无法扣阳光")
+                return
+            sun_addr = board_ptr + self._mem.offsets.sun
+            current_sun = self._mem.read_int(sun_addr)
+            new_sun = max(0, current_sun - cost)
+            self.write_int(sun_addr, new_sun)
+            logger.debug("[注入] 阳光 {} → {} (-{})", current_sun, new_sun, cost)
+        except Exception as exc:
+            logger.warning("[注入] 扣除阳光失败: {}", exc)
 
     def _open_process_for_injection(self) -> int:
         """以注入权限重新打开 PvZ 进程.
