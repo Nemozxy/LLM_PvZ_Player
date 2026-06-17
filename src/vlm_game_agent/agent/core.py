@@ -13,6 +13,7 @@ from pynput import keyboard
 from vlm_game_agent.pause import PauseController
 from vlm_game_agent.vision import WindowCapture
 from vlm_game_agent.webui.manager import ConnectionManager
+from vlm_game_agent.pvz import PvZMemory, PvZStateReader
 
 from .executor import ActionExecutor
 from .llm import VLMClient
@@ -20,6 +21,7 @@ from .memory import MemoryManager
 from .parser import ToolCall, parse_tool_calls
 from .prompt import build_system_prompt
 from .compressor import ContextCompressor
+from .action_logger import ActionLogger
 
 
 class GameAgent:
@@ -46,6 +48,8 @@ class GameAgent:
         delay_type: float = 1.0,
         delay_idle: float = 3.0,
         compressor: ContextCompressor | None = None,
+        action_logger: ActionLogger | None = None,
+        pvz_memory: PvZMemory | None = None,
     ) -> None:
         """初始化 Agent.
 
@@ -65,6 +69,8 @@ class GameAgent:
             delay_type: 文本输入类动作后的最低观察等待（秒）。
             delay_idle: 无有效动作（纯观察轮）的最低等待（秒）。
             compressor: 上下文压缩器（可选），达到阈值时自动压缩历史。
+            action_logger: 操作日志记录器（可选），保存截图与动作日志。
+            pvz_memory: PvZ 内存读取器（可选），注入结构化游戏状态到 prompt。
         """
         self.capture = capture
         self.pause = pause
@@ -90,7 +96,15 @@ class GameAgent:
         self._delay_idle = delay_idle
 
         self._compressor = compressor
+        self._action_logger = action_logger
         self._compress_needed = False
+
+        # PvZ 内存读取
+        self._pvz_memory = pvz_memory
+        self._pvz_reader: PvZStateReader | None = None
+        if self._pvz_memory and self._pvz_memory.is_connected():
+            self._pvz_reader = PvZStateReader(self._pvz_memory)
+            logger.info("[Agent] PvZ 内存读取已启用: {}", self._pvz_memory.version_name)
 
         self._executor: ActionExecutor | None = None
         self._history: list[dict[str, Any]] = []
@@ -111,6 +125,10 @@ class GameAgent:
         logger.info("[Agent] 任务启动: {}", task)
         self._notify_webui("log", f"任务启动: {task}", "info")
 
+        # 开始操作日志会话
+        if self._action_logger:
+            self._action_logger.open(task)
+
         # 启动全局停止热键监听（后台线程）
         self._start_stop_listener()
         logger.info("[Agent] 按 {} 可随时停止 Agent", self.stop_hotkey)
@@ -126,7 +144,8 @@ class GameAgent:
         # 构建系统提示（LM Studio 兼容：content 用字符串而非数组）
         w, h = self.capture.window_size
         window_title = self.capture._window_title if self.capture._window else ""
-        system_prompt = build_system_prompt(w, h, memory_text, window_title)
+        pvz_mode = self._pvz_memory is not None and self._pvz_memory.is_connected()
+        system_prompt = build_system_prompt(w, h, memory_text, window_title, pvz_mode=pvz_mode)
         self._history = [{"role": "system", "content": system_prompt}]
 
         # 首轮用户消息：截图 + 任务
@@ -220,6 +239,19 @@ class GameAgent:
                 logger.warning("[Agent] 未解析到有效动作")
                 self._notify_webui("log", "未解析到动作，继续观察", "warning")
                 self._push_history_assistant(raw_output)
+                # 记录无动作日志
+                if self._action_logger:
+                    now = time.perf_counter()
+                    elapsed = now - self._last_turn_time
+                    self._action_logger.log_turn(
+                        img_b64=img_b64,
+                        reasoning=reasoning if 'reasoning' in dir() else "",
+                        raw_output=raw_output,
+                        tool_calls=[],
+                        execution_results=[],
+                        elapsed_seconds=elapsed,
+                        wait_seconds=self._delay_idle,
+                    )
                 time.sleep(self._delay_idle)
                 continue
 
@@ -227,6 +259,7 @@ class GameAgent:
             self._push_history_assistant(raw_output)
 
             # 8. 执行动作
+            execution_results: list[dict[str, Any]] = []
             for tc in tool_calls:
                 action = tc.arguments.get("action", "")
                 if action == "terminate":
@@ -243,6 +276,7 @@ class GameAgent:
                     continue
 
                 result = self._executor.execute(action, tc.arguments)
+                execution_results.append(result)
                 self._notify_webui("action", action, str(tc.arguments))
 
                 # 把执行结果反馈加入历史
@@ -265,11 +299,27 @@ class GameAgent:
             logger.debug("[Agent] 等待 {} 秒", wait_time)
             time.sleep(wait_time)
 
+            # 记录操作日志
+            if self._action_logger:
+                now = time.perf_counter()
+                elapsed = now - self._last_turn_time
+                self._action_logger.log_turn(
+                    img_b64=img_b64,
+                    reasoning=reasoning if 'reasoning' in dir() else "",
+                    raw_output=raw_output if 'raw_output' in dir() else "",
+                    tool_calls=tool_calls,
+                    execution_results=execution_results,
+                    elapsed_seconds=elapsed,
+                    wait_seconds=wait_time,
+                )
+
             # 记录本轮结束时间，供下轮计算间隔
             self._last_turn_time = time.perf_counter()
 
         logger.info("[Agent] 任务结束")
         self._notify_webui("log", "任务结束", "info")
+        if self._action_logger:
+            self._action_logger.close()
         self._cleanup_stop_listener()
 
     def stop(self) -> None:
@@ -387,6 +437,20 @@ class GameAgent:
         elapsed = now - self._last_turn_time
         time_hint = f"[当前截图，距上一轮 {elapsed:.1f} 秒]"
 
+        # 注入上一轮操作摘要，让模型有持续性记忆
+        last_turn_summary = self._build_last_turn_summary()
+
+        # 注入 PvZ 内存读取的游戏状态
+        game_state_text = self._read_pvz_state()
+
+        # 构建用户消息
+        user_text_parts = [time_hint]
+        if game_state_text:
+            user_text_parts.append(f"\n<game_state>\n{game_state_text}\n</game_state>")
+        user_text_parts.append(f"\n{last_turn_summary}")
+        user_text_parts.append("\n请根据当前截图和游戏状态，输出下一步操作。")
+        user_text = "\n".join(user_text_parts)
+
         messages.append({
             "role": "user",
             "content": [
@@ -394,7 +458,7 @@ class GameAgent:
                     "type": "image_url",
                     "image_url": {"url": f"data:{mime};base64,{img_b64}"},
                 },
-                {"type": "text", "text": f"{time_hint}\n请根据当前截图，输出下一步操作。"},
+                {"type": "text", "text": user_text},
             ],
         })
         return messages
@@ -427,6 +491,30 @@ class GameAgent:
     # ------------------------------------------------------------------ #
     #  辅助
     # ------------------------------------------------------------------ #
+    def _read_pvz_state(self) -> str:
+        """从 PvZ 内存读取游戏状态文本.
+
+        如果 PvZ 内存未连接或读取失败，返回空字符串。
+        """
+        if not self._pvz_reader:
+            # 尝试延迟连接
+            if self._pvz_memory and not self._pvz_memory.is_connected():
+                try:
+                    if self._pvz_memory.connect():
+                        self._pvz_reader = PvZStateReader(self._pvz_memory)
+                        logger.info("[Agent] PvZ 内存读取已连接: {}", self._pvz_memory.version_name)
+                except Exception as exc:
+                    logger.debug("[Agent] PvZ 内存连接失败: {}", exc)
+                    return ""
+
+        if not self._pvz_reader:
+            return ""
+
+        try:
+            return self._pvz_reader.read_and_format()
+        except Exception as exc:
+            logger.warning("[Agent] PvZ 状态读取失败: {}", exc)
+            return ""
     def _get_client_rect(self) -> tuple[int, int, int, int]:
         """返回窗口客户区屏幕坐标 (left, top, right, bottom)."""
         # 复用 capture 中的客户区计算逻辑
