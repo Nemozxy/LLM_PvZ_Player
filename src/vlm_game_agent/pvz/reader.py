@@ -693,12 +693,13 @@ class PvZStateReader:
                         tags += "💤"
                     if p.is_crushed:
                         tags += "💥"
+                    # 只显示玩家能看到的损伤程度，不显示具体血量
                     if p.hp < p.hp_max and p.hp_max > 0:
                         ratio = p.hp_ratio
                         if ratio < 0.3:
-                            tags += "🔴"
+                            tags += "🔴"   # 濒危
                         elif ratio < 0.6:
-                            tags += "🟡"
+                            tags += "🟡"   # 受损
                     # 玉米炮状态
                     if p.state == 35:
                         tags += " 空"
@@ -739,17 +740,22 @@ class PvZStateReader:
                     if z.is_hammering:
                         tags += "🔨"
 
-                    # 血量信息
-                    hp_parts: list[str] = []
+                    # 只显示玩家能看到的装备状态，不显示具体血量数字
+                    accessories: list[str] = []
                     if z.two_hp > 0:
-                        hp_parts.append(f"门{z.two_hp}")
+                        accessories.append("有门")
                     if z.one_hp > 0:
-                        hp_parts.append(f"饰{z.one_hp}")
-                    hp_parts.append(f"本{z.hp}")
-                    hp_str = "+".join(hp_parts)
+                        # 根据僵尸类型显示对应装备
+                        if z.zombie_type in (2,):  # 路障
+                            accessories.append("有帽")
+                        elif z.zombie_type in (4,):  # 铁桶
+                            accessories.append("有桶")
+                        else:
+                            accessories.append("有饰")
 
+                    acc_str = f"({','.join(accessories)})" if accessories else ""
                     col_est = z.col_estimate
-                    parts.append(f"{z.name}[列≈{col_est}, {hp_str}]{tags}")
+                    parts.append(f"{z.name}[列≈{col_est}]{acc_str}{tags}")
                 lines.append(f"  行{row}: {', '.join(parts)}")
         else:
             lines.append("  (当前无僵尸)")
