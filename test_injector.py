@@ -256,11 +256,28 @@ def step4_actions(
             try:
                 parts = choice.split()
                 row, col = int(parts[1]), int(parts[2])
-                print(f"  💉 Shovel row={row} col={col}")
+                state = reader.read_state()
+                print(f"  💉 铲除 row={row} col={col}")
                 try:
+                    # 1. 释放鼠标选中状态
+                    injector.release_mouse()
+                    # 2. 点击铲子按钮
+                    if state.seeds:
+                        last = state.seeds[-1]
+                        if last.x > 0 and last.width > 0:
+                            shovel_x = last.x + last.width + 10 + 24
+                            shovel_y = last.y + last.height // 2
+                        else:
+                            shovel_x, shovel_y = 400, 43
+                    else:
+                        shovel_x, shovel_y = 400, 43
+                    print(f"    铲子按钮: ({shovel_x}, {shovel_y})")
+                    injector.mouse_click(shovel_x, shovel_y)
+                    time.sleep(0.1)
+                    # 3. 点击目标格子
                     gx, gy = injector.grid_to_pixel(row, col)
-                    print(f"    精确坐标: ({gx}, {gy})")
-                    injector.shovel(gx, gy)
+                    print(f"    格子坐标: ({gx}, {gy})")
+                    injector.mouse_click(gx, gy)
                     print("  ✅ 已执行 — 观察游戏画面")
                 except Exception as exc:
                     print(f"  ❌ 失败: {exc}")
