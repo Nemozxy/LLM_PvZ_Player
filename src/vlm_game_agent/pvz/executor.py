@@ -50,8 +50,8 @@ def _win_click(x: int, y: int, move_duration: float = 0.3) -> None:
 COL_WIDTH = 80
 PVZ_STANDARD_WIDTH = 800
 PVZ_STANDARD_HEIGHT = 600
-SHOVEL_X = 400
-SHOVEL_Y = 8
+SHOVEL_X = 625   # 10张卡片后的铲子按钮中心 x (兜底值)
+SHOVEL_Y = 43    # 工具栏垂直居中 y
 
 
 def _grid_y_by_scene(row: int, scene: int) -> int:
@@ -360,16 +360,19 @@ class PvZExecutor:
 
         PvZ 工具栏布局: 阳光计数器 → 种子卡片 → 铲子按钮。
         铲子按钮紧跟最后一张卡片右侧，y 与卡片对齐。
+
+        无卡片时返回兜底值 (按10张卡片估算)。对于教学关等特殊布局，
+        VLM 应直接用 computer_use 点击截图中的铲子按钮。
         """
         if state.seeds:
             last = state.seeds[-1]
             if last.x > 0 and last.width > 0:
-                # 卡片间距 50px，铲子按钮宽约 48px，距卡片约 10px
-                shovel_x = last.x + last.width + 10 + 24  # 卡片右边缘 + 间距 + 半宽
+                # 铲子按钮紧跟最后一张卡片右侧
+                shovel_x = last.x + last.width + 10 + 24  # 右边缘 + 间距 + 半宽
                 shovel_y = last.y + last.height // 2      # 垂直居中
                 return shovel_x, shovel_y
 
-        # 兜底: 10 张卡片时 x≈588, y≈43
+        # 兜底: 按10张卡片推算的位置
         return SHOVEL_X, SHOVEL_Y
 
     def _seed_center(self, seed: SeedInfo) -> tuple[int, int]:
