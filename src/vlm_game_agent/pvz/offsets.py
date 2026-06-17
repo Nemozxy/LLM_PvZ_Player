@@ -306,7 +306,7 @@ class PvZOffsets:
     #   每张卡片大小 = seed_card_size
     seed_count: int = 0x24
     seed_card_offset: int = 0x28    # 第 0 张卡片起始偏移
-    seed_card_size: int = 0x28      # 每张卡片大小
+    seed_card_size: int = 0x50      # 每张卡片大小 (来自 pvztoolkit slot_seed_struct_size)
     sc_type: int = 0x34             # 卡片内: 种子类型
     sc_cd: int = 0x24               # 卡片内: 冷却
     sc_initial_cd: int = 0x28       # 卡片内: 初始冷却

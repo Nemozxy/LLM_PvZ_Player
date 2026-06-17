@@ -25,35 +25,61 @@ from .reader import GameState, SeedInfo
 # ================================================================== #
 #  格子 → 游戏内像素坐标映射
 # ================================================================== #
+#
+# 坐标系说明 (来自 AsmVsZombies / pvztoolkit 逆向):
+# - x 坐标: col * 80 (简单线性，每列 80 像素)
+# - y 坐标: 由游戏内部函数 GridToOrdinate(row, col) 计算，
+#           不同场景有不同的行高和基线，屋顶场景还有斜坡偏移。
+#           我们用近似值代替，对于点击植物格子来说足够精确。
+#
+# 行数: 白天/黑夜/屋顶/月夜 = 5 行 (row 0~4)
+#        泳池/雾夜 = 6 行 (row 0~5)
+# 列数: 统一 9 列 (col 0~8)
+#
+# 参考: AsmVsZombies avz_click.cpp AGridToCoordinate()
+#        AvZLib AverageSpawn.h baseY/height 参数
 
-# 游戏内网格原点和尺寸（来自 AsmVsZombies / pvztoolkit 逆向）
-# 这些是 800x600 窗口下的值，其他分辨率按比例缩放
+# 铲子按钮在游戏内的大致位置 (800x600 基准)
+# 铲子图标位于卡槽栏右上方，约 x=400, y=8
+# 注意: 这是一个近似值，实际位置可能因卡片数量不同而偏移
+SHOVEL_X = 400
+SHOVEL_Y = 8
 
-# 白天/黑夜场景 (草地)
-GRID_LAWN_LEFT = 40       # 第0列左边界的 x 坐标
-GRID_LAWN_TOP = 90        # 第0行上边界的 y 坐标
-GRID_LAWN_CELL_W = 80     # 每格宽度
-GRID_LAWN_CELL_H = 100    # 每格高度
-
-# 泳池/雾夜场景
-GRID_POOL_LEFT = 40
-GRID_POOL_TOP = 90
-GRID_POOL_CELL_W = 80
-GRID_POOL_CELL_H = 100
-
-# 天台/月夜场景
-GRID_ROOF_LEFT = 40
-GRID_ROOF_TOP = 90
-GRID_ROOF_CELL_W = 80
-GRID_ROOF_CELL_H = 100
+# 列 x 坐标: col * 80 (来自 AsmVsZombies avz_click.cpp 第49行)
+COL_WIDTH = 80
 
 # PvZ 窗口标准客户区尺寸
 PVZ_STANDARD_WIDTH = 800
 PVZ_STANDARD_HEIGHT = 600
 
-# 铲子按钮在游戏内的大致位置 (800x600 基准)
-SHOVEL_X = 640
-SHOVEL_Y = 10
+
+def _grid_y_by_scene(row: int, scene: int) -> int:
+    """根据场景类型计算格子中心的 y 坐标 (800x600 基准).
+
+    近似值，来自 AvZLib AverageSpawn.h 的 baseY/height 参数:
+    - 白天/黑夜: baseY=50, rowHeight=100
+    - 泳池/雾夜: baseY=50, rowHeight=85
+    - 屋顶/月夜: baseY=40, rowHeight=85 (屋顶有斜坡，首行更高)
+
+    这些是 1-indexed 僵尸 ordinate 值。
+    格子中心 ≈ ordinate + rowHeight/2，但实际 AvZ 点击用 +40。
+    我们直接用查表法返回格子中心 y。
+    """
+    if scene in (2, 3):
+        # 泳池/雾夜: 6行, baseY=50, height=85
+        # 行0中心 y ≈ 50 + 0*85 + 42 = 92  → 实际约 92
+        # 行5中心 y ≈ 50 + 5*85 + 42 = 517
+        return 50 + row * 85 + 42
+    elif scene in (4, 5):
+        # 屋顶/月夜: 5行, baseY=40, height=85
+        # 但屋顶有斜坡，实际行高不均匀
+        # 近似值，精确需要调用游戏内部 GridToOrdinate
+        return 40 + row * 85 + 42
+    else:
+        # 白天/黑夜: 5行, baseY=50, height=100
+        # 行0中心 y ≈ 50 + 0*100 + 50 = 100
+        # 行4中心 y ≈ 50 + 4*100 + 50 = 500
+        return 50 + row * 100 + 50
 
 
 def grid_to_game_pixel(
@@ -64,25 +90,23 @@ def grid_to_game_pixel(
     """将 (行, 列) 转换为游戏内像素坐标 (格子中心).
 
     Args:
-        row: 行号 0~5 (从上到下)
-        col: 列号 0~8 (从左到右)
+        row: 行号。白天/黑夜/屋顶 0~4，泳池/雾夜 0~5。
+        col: 列号 0~8。
         scene: 场景类型 (0=白天 1=黑夜 2=泳池 3=雾夜 4=天台 5=月夜)
 
     Returns:
         (x, y) 游戏内像素坐标 (800x600 基准)
     """
-    if scene in (SceneType.POOL, SceneType.FOG):
-        left, top = GRID_POOL_LEFT, GRID_POOL_TOP
-        cell_w, cell_h = GRID_POOL_CELL_W, GRID_POOL_CELL_H
-    elif scene in (SceneType.ROOF, SceneType.MOON):
-        left, top = GRID_ROOF_LEFT, GRID_ROOF_TOP
-        cell_w, cell_h = GRID_ROOF_CELL_W, GRID_ROOF_CELL_H
-    else:
-        left, top = GRID_LAWN_LEFT, GRID_LAWN_TOP
-        cell_w, cell_h = GRID_LAWN_CELL_W, GRID_LAWN_CELL_H
+    # x: 列号 * 80 (来自 AsmVsZombies avz_click.cpp: x = int(col * 80.0 + 0.5))
+    x = col * COL_WIDTH
 
-    x = left + col * cell_w + cell_w // 2
-    y = top + row * cell_h + cell_h // 2
+    # y: 根据场景查表
+    y = _grid_y_by_scene(row, scene)
+
+    # 边界裁剪
+    x = max(0, min(799, x))
+    y = max(0, min(599, y))
+
     return x, y
 
 
