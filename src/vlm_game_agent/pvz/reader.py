@@ -121,13 +121,13 @@ class ZombieInfo:
         return self.state in (1, 2, 3)
 
     @property
-    def col_estimate(self) -> int:
-        """将横坐标估算为列号 (0~8)."""
+    def col_estimate(self) -> float:
+        """将横坐标估算为列号 (0~8)，保留一位小数。"""
         # PvZ 格子: 每格约 80 像素宽
         # 左边界约 x=40, 从左到右 col 0→8
         if self.abscissa <= 0:
-            return 0
-        return min(8, max(0, int((self.abscissa - 40) / 80)))
+            return 0.0
+        return min(8.0, max(0.0, round((self.abscissa - 40) / 80, 1)))
 
 
 @dataclass
@@ -755,7 +755,7 @@ class PvZStateReader:
 
                     acc_str = f"({','.join(accessories)})" if accessories else ""
                     col_est = z.col_estimate
-                    parts.append(f"{z.name}[列≈{col_est}]{acc_str}{tags}")
+                    parts.append(f"{z.name}[列≈{col_est:.1f}]{acc_str}{tags}")
                 lines.append(f"  行{row}: {', '.join(parts)}")
         else:
             lines.append("  (当前无僵尸)")
