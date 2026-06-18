@@ -24,7 +24,7 @@ class VLMClient:
         base_url: str = "http://127.0.0.1:8888/v1",
         model: str = "qwen3.6-35b-a3b-apex",
         api_key: str = "sk-no-key-required",
-        max_tokens: int = 8192,
+        max_output_tokens: int = 8192,
         temperature: float = 0.4,
         retries: int = 3,
         retry_delay: float = 2.0,
@@ -35,7 +35,7 @@ class VLMClient:
         self.chat_url = f"{self.base_url}/chat/completions"
         self.model = model
         self.api_key = api_key
-        self.max_tokens = max_tokens
+        self.max_output_tokens = max_output_tokens
         self.temperature = temperature
         self.retries = retries
         self.retry_delay = retry_delay
@@ -61,7 +61,7 @@ class VLMClient:
         body = json.dumps({
             "model": self.model,
             "messages": messages,
-            "max_tokens": self.max_tokens,
+            "max_tokens": self.max_output_tokens,
             "temperature": self.temperature,
         }, ensure_ascii=False)
 

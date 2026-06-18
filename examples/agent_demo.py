@@ -99,7 +99,7 @@ def main() -> None:
         base_url=settings.vlm_base_url,
         model=settings.vlm_model,
         api_key=settings.vlm_api_key,
-        max_tokens=settings.vlm_max_tokens,
+        max_output_tokens=settings.vlm_max_output_tokens,
         temperature=settings.vlm_temperature,
     )
 
@@ -131,7 +131,7 @@ def main() -> None:
         base_url=compress_base_url,
         model=compress_model,
         api_key=compress_api_key,
-        max_tokens=settings.agent_context_max_tokens,
+        max_tokens=settings.vlm_context_size,
         compress_threshold=settings.agent_context_compress_threshold,
     )
 
