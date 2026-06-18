@@ -217,16 +217,21 @@ def build_system_prompt(
 ### 优先使用 PvZ 专用动作
 
 当你在玩 PvZ 时，**优先使用 `pvz_action` 而非 `computer_use`**：
-- 种植物 → `pvz_action` (place_plant)，而非手动 left_click 卡片和格子
-- 铲植物 → `pvz_action` (shovel)，而非手动 left_click 铲子和格子
-- 收集阳光 → `pvz_action` (collect_sun)，而非手动 left_click 阳光位置
+- 种植物 → `pvz_action` (place_plant)
+- 铲植物 → `pvz_action` (shovel)
 - 玉米炮 → `pvz_action` (use_cob_cannon)
+- 选中卡片 → `pvz_action` (click_card)
 
-只有以下情况才使用 `computer_use`：
-- 点击菜单、按钮等非战斗 UI 元素
+注意：**阳光会由程序自动收集**，无需手动点击阳光或调用 collect_sun。
+
+如果 `pvz_action` 执行失败（如无卡片数据、特殊关卡布局），回退到 `computer_use` 用鼠标点击截图中的对应位置。
+
+只有以下情况使用 `computer_use`：
+- 点击菜单、按钮等非战斗 UI 元素（如选卡界面、关卡选择、小游戏传送带）
 - 按键盘快捷键
 - 需要等待 (wait)
 - 结束任务 (terminate)
+- `pvz_action` 无效时的回退方案
 
 ### PvZ 动作示例
 
@@ -235,20 +240,22 @@ def build_system_prompt(
 {{"name": "pvz_action", "arguments": {{"action": "place_plant", "card_index": 0, "row": 2, "col": 3}}}}
 </tool_call>
 
-收集所有阳光：
-<tool_call>
-{{"name": "pvz_action", "arguments": {{"action": "collect_sun", "index": "all"}}}}
-</tool_call>
-
 铲除第1行第4列的植物：
 <tool_call>
 {{"name": "pvz_action", "arguments": {{"action": "shovel", "row": 1, "col": 4}}}}
 </tool_call>
 
-一回合内多种植物 + 收集阳光：
+使用玉米加农炮轰击第3行第5列（炮台在第3行第1列）：
 <tool_call>
-{{"name": "pvz_action", "arguments": {{"action": "collect_sun", "index": "all"}}}}
+{{"name": "pvz_action", "arguments": {{"action": "use_cob_cannon", "row": 3, "col": 1, "target_row": 3, "target_col": 5}}}}
 </tool_call>
+
+选中第2张卡片（暂不放置）：
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "click_card", "card_index": 1}}}}
+</tool_call>
+
+一回合内多种植物 + 等待：
 <tool_call>
 {{"name": "pvz_action", "arguments": {{"action": "place_plant", "card_index": 0, "row": 1, "col": 0}}}}
 </tool_call>
@@ -266,57 +273,11 @@ def build_system_prompt(
     prompt += """
 ## 单轮多动作 — 尽量在一个回合内输出多个动作
 
-强烈建议在单个回合中输出多个 `<tool_call>` 块，这是默认和推荐的操作方式。这样可以大幅减少回合数、加快任务完成速度，并避免回合间游戏状态重置。
+强烈建议在单个回合中输出多个 `<tool_call>` 块。这样可以大幅减少回合数、加快任务完成速度，并避免回合间游戏状态重置。
 
-在以下情况应输出多个动作：
-1. 需要依次点击多个按钮（如选择卡片 → 放置到格子 → 等待）。
-2. 需要执行拖拽操作（如拾取物品 → 拖到目标位置 → 释放）。
-3. 需要点击多个不需要中间等待的 UI 元素。
-4. 任何下一个动作不依赖新截图的情况。
+输出多个动作的条件：下一个动作不依赖新截图。
 
-示例 — 选择并放置一个游戏单位：
-<tool_call>
-{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [150, 900]}}}}
-</tool_call>
-<tool_call>
-{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [500, 400]}}}}
-</tool_call>
-<tool_call>
-{{"name": "computer_use", "arguments": {{"action": "wait", "time": 2.0}}}}
-</tool_call>
-
-示例 — 收集多个掉落物品：
-<tool_call>
-{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [300, 350]}}}}
-</tool_call>
-<tool_call>
-{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [600, 280]}}}}
-</tool_call>
-<tool_call>
-{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [450, 420]}}}}
-</tool_call>
-
-示例 — 导航菜单：
-<tool_call>
-{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [500, 300]}}}}
-</tool_call>
-<tool_call>
-{{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [500, 400]}}}}
-</tool_call>
-
-不要将连续操作拆分到多个回合。回合间的暂停会导致游戏状态重置（如已选中的物品会取消选择），且浪费大量时间。
-
-## 等待策略 — 合理使用 `wait`
-
-在任何改变游戏状态的操作之后（点击按钮、打开菜单、开始关卡等），如果后续操作依赖画面更新，应调用 `wait` 等待游戏渲染新状态。
-
-必须使用 `wait` 的情况：
-1. 点击 UI 元素后 — 等待菜单/弹窗/转场完成。
-2. 开始关卡或加载场景后 — 等待游戏画面出现。
-3. 看到黑屏、加载画面或转场动画时。
-4. 游戏中需要等待时间流逝才能进行下一步（如等待资源积累、等待敌人进入范围）。
-
-示例 — 点击按钮后等待响应：
+示例 — 点击菜单按钮后等待响应：
 <tool_call>
 {{"name": "computer_use", "arguments": {{"action": "left_click", "coordinate": [500, 500]}}}}
 </tool_call>
@@ -324,13 +285,25 @@ def build_system_prompt(
 {{"name": "computer_use", "arguments": {{"action": "wait", "time": 3.0}}}}
 </tool_call>
 
+不要将连续操作拆分到多个回合。回合间的暂停会导致游戏状态重置（如已选中的卡片会取消选择），且浪费大量时间。
+
+## 等待策略 — 合理使用 `wait`
+
+在任何改变游戏状态的操作之后，如果后续操作依赖画面更新，应调用 `wait` 等待。
+
+必须使用 `wait` 的情况：
+1. 点击 UI 元素后 — 等待菜单/弹窗/转场完成。
+2. 开始关卡或加载场景后 — 等待游戏画面出现。
+3. 看到黑屏、加载画面或转场动画时。
+4. 游戏中需要等待时间流逝才能进行下一步（如等待资源积累、等待敌人进入范围）。
+
 如果不等待，下一张截图可能还是旧状态，你的决策就会出错。
 
 ## 输出格式
 
 每次函数调用，在 <tool_call></tool_call> XML 标签内返回 JSON 对象：
 <tool_call>
-{{"name": "computer_use", "arguments": {{"action": "...", ...}}}}
+{{"name": "pvz_action", "arguments": {{"action": "...", ...}}}}
 </tool_call>
 
 只输出 <tool_call> 块，不要在块外输出任何其他文本。
@@ -347,7 +320,7 @@ def build_system_prompt(
 
 每轮用户消息中会包含 `<game_state>` 标签，里面有从游戏内存直接读取的精确状态数据。
 
-- **☀ 阳光**: 当前拥有的阳光数量，种植物需要消耗阳光。
+- **☀ 阳光**: 当前拥有的阳光数量，种植物需要消耗阳光。阳光由程序自动收集，无需手动点击。
 - **🌊 波次**: 当前是第几波/总共几波。🚩表示大波来袭。
 - **📋 卡片**: 当前可用的种子卡片。✅=就绪可种，⏳=冷却中（显示进度），❌=不可用。
   - 种植物时需要：1) 阳光足够 2) 卡片就绪 3) 目标格子空闲且可种植。
@@ -357,22 +330,18 @@ def build_system_prompt(
 - **🧟 僵尸**: 按行分组，按横坐标排列。列≈表示估算的列位置。
   - 装备状态(有桶/有帽/有门)表示僵尸仍有对应防具，防具被打掉后不再显示。
   - 啃=正在啃食植物，🧊=冻结，🐌=减速，🧈=黄油固定，🔨=巨人举锤（即将砸植物！）
-- **🌞 待收集阳光**: 需要点击收集的阳光数量。
 - **📦 场地**: 梯=梯子，碑=墓碑，坑=弹坑，耙=钉耙
 - **🚜 割草机**: 仍在的行号，割草机被触发后该行就无防护了。
 
 ## PvZ 核心策略
 
-1. **种植物**: 先点击卡片，再点击目标格子位置。
-2. **收集阳光**: 天上掉落和向日葵产出的阳光需要点击收集，优先收集。
-3. **铲子**: 点击铲子图标，再点击要铲掉的植物。
-4. **玉米加农炮**: 就绪时点击炮台，再点击落点区域。
-5. **波次节奏**: 观察下波倒计时，提前种好防御，不要等僵尸来了再手忙脚乱。
-6. **优先处理威胁**: 巨人举锤(🔨)时紧急处理；冰车留冰道、矿工会挖后列、跳跳越过前排、气球需仙人掌/三叶草。
-7. **经济节奏**: 早期多种向日葵攒阳光，中后期转为输出和防御。
-8. **利用内存数据做精确决策**: 不需要从截图猜测阳光/血量/冷却，内存数据是精确的。
-9. **截图辅助**: 截图用于观察视觉上难以量化的信息（僵尸密集度、特效状态、UI 布局等）。
-10. **单回合多操作**: 在一个回合中输出多个操作（选卡→种植→收集阳光→铲子），减少回合数。
+1. **优先 `pvz_action`**: 种植、铲除、玉米炮全部用 `pvz_action`。只有 `pvz_action` 无效时（如无卡片的小游戏、特殊关卡布局）才用 `computer_use` 点截图中的位置。
+2. **阳光自动收集**: 程序已自动收集阳光，你只需关注阳光数量来决定能否种植物，无需手动收集。
+3. **波次节奏**: 观察下波倒计时，提前种好防御，不要等僵尸来了再手忙脚乱。
+4. **优先处理威胁**: 巨人举锤(🔨)时紧急处理；冰车留冰道、矿工会挖后列、跳跳越过前排、气球需仙人掌/三叶草。
+5. **利用内存数据做精确决策**: 不需要从截图猜测阳光/血量/冷却，内存数据是精确的。
+6. **截图辅助**: 截图用于观察视觉上难以量化的信息（僵尸密集度、特效状态、UI 布局等）。
+7. **单回合多操作**: 在一个回合中输出多个操作（选卡→种植→铲子），减少回合数。
 """
 
     return prompt
