@@ -8,15 +8,15 @@ PVZ_ACTION_SCHEMA = {
     "type": "function",
     "function": {
         "name": "pvz_action",
-        "description": (
-            "植物大战僵尸专用动作。利用内存读取的精确坐标，直接执行高层语义化操作，无需手动计算点击位置。\n"
-            "* 种植物时系统会自动点击卡片再点击目标格子。\n"
-            "* 铲子会自动点击铲子按钮再点击目标格子。\n"
-            "* 收集阳光会自动点击阳光的精确位置。\n"
-            "* row 和 col 均为 0-based：行 0~5（从上到下），列 0~8（从左到右）。\n"
-            "* card_index 与 <game_state> 中卡片的 [序号] 一致。\n"
-            "* 执行前请确认：阳光足够、卡片就绪、目标格子空闲。"
-        ),
+            "description": (
+                "植物大战僵尸专用动作。利用内存读取的精确坐标，直接执行高层语义化操作，无需手动计算点击位置。\n"
+                "* row/col 是 0-based 坐标：游戏左上角第一格是 (0, 0)，向下/向右递增。\n"
+                "* row 0~5（从上到下），col 0~8（从左到右）。\n"
+                "* card_index 与 <game_state> 中卡片的 [序号] 一致，也是 0-based。\n"
+                "* 种植物时系统会自动点击卡片再点击目标格子。\n"
+                "* 铲子会自动点击铲子按钮再点击目标格子。\n"
+                "* 执行前请确认：阳光足够、卡片就绪、目标格子空闲。"
+            ),
         "parameters": {
             "type": "object",
             "required": ["action"],
@@ -235,17 +235,17 @@ def build_system_prompt(
 
 ### PvZ 动作示例
 
-种一个向日葵到第2行第3列（假设向日葵卡片序号为0）：
+种一个向日葵到 row=0, col=0（游戏左上角第一格，假设向日葵卡片序号为0）：
 <tool_call>
-{{"name": "pvz_action", "arguments": {{"action": "place_plant", "card_index": 0, "row": 2, "col": 3}}}}
+{{"name": "pvz_action", "arguments": {{"action": "place_plant", "card_index": 0, "row": 0, "col": 0}}}}
 </tool_call>
 
-铲除第1行第4列的植物：
+铲除 row=1, col=4 的植物：
 <tool_call>
 {{"name": "pvz_action", "arguments": {{"action": "shovel", "row": 1, "col": 4}}}}
 </tool_call>
 
-使用玉米加农炮轰击第3行第5列（炮台在第3行第1列）：
+使用玉米加农炮轰击 target_row=3, target_col=5（炮台在 row=3, col=1）：
 <tool_call>
 {{"name": "pvz_action", "arguments": {{"action": "use_cob_cannon", "row": 3, "col": 1, "target_row": 3, "target_col": 5}}}}
 </tool_call>
@@ -261,9 +261,6 @@ def build_system_prompt(
 </tool_call>
 <tool_call>
 {{"name": "pvz_action", "arguments": {{"action": "place_plant", "card_index": 0, "row": 1, "col": 1}}}}
-</tool_call>
-<tool_call>
-{{"name": "computer_use", "arguments": {{"action": "wait", "time": 2.0}}}}
 </tool_call>
 """
     else:
