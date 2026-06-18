@@ -58,3 +58,21 @@ def parse_tool_calls(text: str) -> list[ToolCall]:
 
     logger.info("[解析] 提取到 {} 个 tool_call", len(calls))
     return calls
+
+
+# --------------------------------------------------------------------------- #
+#  模型主动压缩标记 <compact>
+# --------------------------------------------------------------------------- #
+_compact_re = re.compile(r"<compact>\s*(.*?)\s*</compact>", re.DOTALL)
+
+
+def parse_compact(text: str) -> str | None:
+    """检测并提取模型主动输出的 <compact> 摘要内容。
+
+    返回摘要文本（去空白后）；若无 <compact> 标记返回 None。
+    """
+    m = _compact_re.search(text)
+    if not m:
+        return None
+    summary = m.group(1).strip()
+    return summary if summary else None

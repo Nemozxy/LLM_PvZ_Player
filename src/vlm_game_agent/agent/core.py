@@ -18,7 +18,7 @@ from vlm_game_agent.pvz import PvZExecutor, PvZMemory, PvZStateReader
 from .executor import ActionExecutor
 from .llm import VLMClient
 from .memory import MemoryManager
-from .parser import ToolCall, parse_tool_calls
+from .parser import ToolCall, parse_tool_calls, parse_compact
 from .prompt import build_system_prompt
 from .compressor import ContextCompressor
 from .action_logger import ActionLogger
@@ -253,6 +253,21 @@ class GameAgent:
                     logger.warning("[Agent] 恢复失败: {}", exc)
 
             # 7. 解析动作
+            # === 模型主动压缩：检测 <compact> 标记 ===
+            compact_summary = parse_compact(raw_output)
+            if compact_summary is not None:
+                logger.info("[Agent] 模型主动压缩上下文（<compact>），摘要 {} 字符", len(compact_summary))
+                self._notify_webui("log", "模型已主动压缩上下文", "info")
+                # 激进保留：只留 system + 摘要消息
+                system_msg = self._history[0]
+                self._history = [
+                    system_msg,
+                    {"role": "assistant", "content": f"[历史摘要]\n{compact_summary}"},
+                ]
+                # 纯摘要轮：不解析/执行任何动作，直接进入下一轮
+                time.sleep(self._delay_idle)
+                continue
+
             tool_calls = parse_tool_calls(raw_output)
             if not tool_calls:
                 logger.warning("[Agent] 未解析到有效动作")
