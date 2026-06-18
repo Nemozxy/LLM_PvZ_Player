@@ -211,6 +211,9 @@ class GameAgent:
                 messages = compressed
                 self._compress_needed = False
 
+            # 4.6 推送本轮 prompt 到 WebUI（默认折叠）
+            self._push_prompt_to_webui(messages)
+
             # 5. VLM 推理
             try:
                 raw_output, reasoning = self.vlm.chat(messages)
@@ -521,6 +524,33 @@ class GameAgent:
         if self.webui is None:
             return None
         return self.webui.get_command()
+
+    def _push_prompt_to_webui(self, messages: list[dict[str, Any]]) -> None:
+        """推送本轮 prompt 摘要到 WebUI（默认折叠）.
+
+        提取发给 AI 的文本内容（跳过图片），方便调试查看 AI 收到了什么。
+        """
+        if self.webui is None or self.webui._loop is None:
+            return
+        parts: list[str] = []
+        for msg in messages:
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # 数组 content，提取文本部分（跳过 image_url）
+                texts = [p.get("text", "") for p in content if p.get("type") == "text"]
+                content = "\n".join(texts)
+            if not isinstance(content, str) or not content.strip():
+                continue
+            # system 消息太长，只截取首行摘要
+            if role == "system":
+                first_line = content.strip().split("\n")[0]
+                parts.append(f"[system] {first_line}...")
+            else:
+                parts.append(f"[{role}] {content}")
+        if parts:
+            text = "\n".join(parts)
+            asyncio.run_coroutine_threadsafe(self.webui.push_prompt(text), self.webui._loop)
 
     # ------------------------------------------------------------------ #
     #  辅助

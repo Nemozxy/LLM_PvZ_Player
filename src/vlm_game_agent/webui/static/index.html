@@ -100,6 +100,31 @@
       margin-right: 6px;
       font-size: 11px;
     }
+    .log-entry.prompt {
+      color: #66bb6a;
+      cursor: pointer;
+    }
+    .log-entry.prompt .prompt-header {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .log-entry.prompt .prompt-arrow {
+      font-size: 10px;
+      transition: transform 0.2s;
+    }
+    .log-entry.prompt .prompt-arrow.open { transform: rotate(90deg); }
+    .log-entry.prompt .prompt-body {
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: #1e2a1e;
+      border-radius: 4px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 400px;
+      overflow-y: auto;
+    }
 
     .input-area {
       display: flex;
@@ -195,9 +220,19 @@
           :key="idx"
           class="log-entry"
           :class="log.level"
+          @click="log.level === 'prompt' && togglePrompt(idx)"
         >
           <span class="log-time">{{ log.time }}</span>
-          <span>{{ log.text }}</span>
+          <template v-if="log.level === 'prompt'">
+            <div class="prompt-header">
+              <span class="prompt-arrow" :class="{ open: log.expanded }">▶</span>
+              <span>📤 User Prompt (点击展开)</span>
+            </div>
+            <div v-if="log.expanded" class="prompt-body">{{ log.text }}</div>
+          </template>
+          <template v-else>
+            <span>{{ log.text }}</span>
+          </template>
         </div>
       </div>
       <div class="input-area">
@@ -286,6 +321,8 @@
             this.addLog('', msg.text, msg.level || 'info');
           } else if (msg.type === 'action') {
             this.addLog('动作', `${msg.action}: ${msg.detail}`, 'action');
+          } else if (msg.type === 'prompt') {
+            this.addLog('', msg.text, 'prompt');
           } else if (msg.type === 'pong') {
             // 心跳回应
           }
@@ -309,9 +346,13 @@
 
         sendCommand() {
           const text = this.commandText.trim();
-          if (!text || !this.wsConnected) return;
+          if (!text || !wsConnected) return;
           this.ws.send(JSON.stringify({ type: 'command', text }));
           this.commandText = '';
+        },
+
+        togglePrompt(idx) {
+          this.logs[idx].expanded = !this.logs[idx].expanded;
         },
       },
     }).mount('#app');

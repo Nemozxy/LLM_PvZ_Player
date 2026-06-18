@@ -64,6 +64,10 @@ class ConnectionManager:
         """推送一条操作流水记录."""
         await self.broadcast({"type": "action", "action": action, "detail": detail})
 
+    async def push_prompt(self, text: str) -> None:
+        """推送一轮发给 AI 的 user prompt 内容（不含图片）."""
+        await self.broadcast({"type": "prompt", "text": text})
+
     # ------------------------------------------------------------------ #
     #  接收用户指令
     # ------------------------------------------------------------------ #
