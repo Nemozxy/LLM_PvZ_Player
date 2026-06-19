@@ -194,13 +194,13 @@ class GameState:
     # 是否在战斗中
     @property
     def in_battle(self) -> bool:
-        # game_ui 在教学关/小游戏等特殊场景不可靠（可能是 SELECT_CARD=2
-        # 而非 IN_GAME=3）。这里用"有 MainObject 且场上存在战斗实体"判定，
-        # 与 read_state/format_state 的守卫保持一致。
-        # 实体在 read_state 中赋值，未读取时为空 → in_battle=False。
-        return bool(
-            self.plants or self.zombies or self.lawn_mowers or self.grid_items
-        ) or self.game_ui == GameUI.IN_GAME
+        # game_ui==IN_GAME(3): 正常战斗，一定在战斗中
+        # game_ui!=IN_GAME 但 plants>0: 教学关等特殊场景（game_ui 仍是 2 但实际在战斗，
+        #   场上有要铲的教学植物）。用 plants 而非 zombies 判定，因为选卡界面会预加载
+        #   僵尸到屏幕外等待（zombies>0 但 plants=0），不能误判为战斗中。
+        if self.game_ui == GameUI.IN_GAME:
+            return True
+        return bool(self.plants)
 
 
 # ================================================================== #
