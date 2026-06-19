@@ -132,7 +132,7 @@ class PvZExecutor:
         """判断是否为 PvZ 专属动作."""
         return action in (
             "place_plant", "shovel", "collect_sun",
-            "use_cob_cannon", "click_card",
+            "use_cob_cannon", "click_card", "win_level",
         )
 
     def execute(self, action: str, args: dict[str, Any], state: GameState) -> dict[str, Any]:
@@ -151,6 +151,8 @@ class PvZExecutor:
                 self._collect_sun(args, state, result)
             elif action == "use_cob_cannon":
                 self._use_cob_cannon(args, state, result)
+            elif action == "win_level":
+                self._win_level(args, state, result)
             else:
                 raise ValueError(f"未知 PvZ 动作: {action}")
         except Exception as exc:
@@ -352,6 +354,19 @@ class PvZExecutor:
             _win_click(sx, sy)
 
         result["detail"] = f"玉米炮 ({row},{col}) → ({target_row},{target_col})"
+
+    def _win_level(self, args: dict, state: GameState, result: dict) -> None:
+        """直接通关 — 跳过当前关卡.
+
+        用于跳过 AI 难以胜任的实时小游戏（坚果保龄球、传送带关卡等）。
+        调用游戏内部 FadeOutLevel 触发通关。纯注入功能，无鼠标 fallback。
+        """
+        if self._injector:
+            self._injector.win_level()
+        else:
+            raise RuntimeError("直接通关需要代码注入器，当前未启用")
+
+        result["detail"] = "已触发直接通关"
 
     # ------------------------------------------------------------------ #
     #  内部工具

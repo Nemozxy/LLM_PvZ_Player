@@ -29,11 +29,12 @@ PVZ_ACTION_SCHEMA = {
                         "* `shovel`：铲除植物。先点击铲子按钮，再点击目标格子。\n"
                         "* `collect_sun`：收集阳光。点击场上的阳光。\n"
                         "* `click_card`：选中一张卡片（暂不放置，用于后续操作）。\n"
-                        "* `use_cob_cannon`：使用玉米加农炮。先点击炮台，再点击落点。"
+                        "* `use_cob_cannon`：使用玉米加农炮。先点击炮台，再点击落点。\n"
+                        "* `win_level`：直接通关当前关卡（跳过）。用于跳过 AI 难以胜任的实时小游戏。"
                     ),
                     "enum": [
                         "place_plant", "shovel", "collect_sun",
-                        "click_card", "use_cob_cannon",
+                        "click_card", "use_cob_cannon", "win_level",
                     ],
                 },
                 "card_index": {
@@ -221,6 +222,9 @@ def build_system_prompt(
 - 铲植物 → `pvz_action` (shovel)
 - 玉米炮 → `pvz_action` (use_cob_cannon)
 - 选中卡片 → `pvz_action` (click_card)
+- 跳过实时小游戏 → `pvz_action` (win_level)
+
+⚠ **实时小游戏直接跳过**：坚果保龄球、传送带关卡等对实时性要求极高，AI 的反应速度跟不上，强行玩必然失败。识别到这类关卡（传送带上有移动的卡片、保龄球玩法等）时，直接调用 `win_level` 跳过，不要浪费时间尝试。
 
 注意：**阳光会由程序自动收集**，无需手动点击阳光或调用 collect_sun。
 
@@ -253,6 +257,11 @@ def build_system_prompt(
 选中第2张卡片（暂不放置）：
 <tool_call>
 {{"name": "pvz_action", "arguments": {{"action": "click_card", "card_index": 1}}}}
+</tool_call>
+
+直接通关跳过当前关卡（如坚果保龄球等实时小游戏）：
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "win_level"}}}}
 </tool_call>
 
 一回合内多种植物 + 等待：

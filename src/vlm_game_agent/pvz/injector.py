@@ -85,6 +85,11 @@ FUNC_MOUSE_UP = 0x5392E0
 # 调用约定: eax = Board*, 无参数
 FUNC_RELEASE_MOUSE = 0x40CD80
 
+# FadeOutLevel — 来自 pvztoolkit PvZ::DirectWin (data.cpp:179, V1_0_0_1051_EN)
+# 直接过关: 触发关卡结束的淡出动画，游戏判定本关通关。
+# 调用约定: ECX = Board*, 无参数 (thiscall，与 ReleaseMouse 仅寄存器不同)
+FUNC_FADE_OUT_LEVEL = 0x41B8D0
+
 # GridToAbscissa(row, col) → x 像素坐标
 # ECX = Board*, EAX = col, ESI = row
 FUNC_GRID_TO_ABSCISSA = 0x41C680
@@ -599,6 +604,30 @@ class PvZCodeInjector:
         # ret
         code += b'\xC3'
         self._inject_and_execute(bytes(code))
+
+    def win_level(self) -> None:
+        """直接通关 — 调用游戏内部 FadeOutLevel 触发本关结束.
+
+        对应 pvztoolkit 的"直接过关"功能。用于跳过 AI 难以胜任的实时小游戏
+        （如坚果保龄球、传送带关卡），这些关卡对实时性要求极高，AI 的
+        截图→推理→执行周期跟不上，强行玩只会失败。
+
+        调用约定: ECX = Board*, 无参数 (thiscall)。
+        """
+        logger.info("[注入] FadeOutLevel 直接通关")
+        code = bytearray()
+        # mov ecx, [PVZ_BASE]
+        code += b'\x8B\x0D' + struct.pack('<I', PVZ_BASE)
+        # mov ecx, [ecx + BOARD_OFFSET]  ; ecx = Board*
+        code += b'\x8B\x89' + struct.pack('<I', BOARD_OFFSET)
+        # mov edx, FUNC_FADE_OUT_LEVEL
+        code += b'\xBA' + struct.pack('<I', FUNC_FADE_OUT_LEVEL)
+        # call edx
+        code += b'\xFF\xD2'
+        # ret
+        code += b'\xC3'
+        self._inject_and_execute(bytes(code))
+        time.sleep(0.05)
 
     def grid_to_pixel(self, row: int, col: int) -> tuple[int, int]:
         """调用游戏内部 GridToAbscissa/Ordinate 获取格子中心像素坐标.
