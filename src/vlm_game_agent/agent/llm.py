@@ -80,6 +80,7 @@ class VLMClient:
                         self.curl_path, "-s",
                         self.chat_url,
                         "-H", "Content-Type: application/json",
+                        "-H", f"Authorization: Bearer {self.api_key}",
                         "-d", "@-",
                         "--max-time", str(int(self.timeout)),
                     ],
