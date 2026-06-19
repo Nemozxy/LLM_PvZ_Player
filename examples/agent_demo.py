@@ -171,6 +171,8 @@ def main() -> None:
         action_logger=action_logger,
         stop_hotkey=stop_hotkey,
         pvz_memory=pvz_memory,
+        include_images_in_history=settings.agent_include_images_in_history,
+        include_reasoning_in_history=settings.agent_include_reasoning_in_history,
     )
 
     # 7. 任务目标：配置优先，否则交互输入

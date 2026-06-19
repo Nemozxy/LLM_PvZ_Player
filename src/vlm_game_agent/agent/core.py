@@ -38,7 +38,7 @@ class GameAgent:
         vlm: VLMClient,
         memory: MemoryManager | None = None,
         webui: ConnectionManager | None = None,
-        max_history_turns: int = 6,
+        max_history_turns: str | int = "full",
         pause_before_think: bool = True,
         stop_hotkey: keyboard.Key = keyboard.Key.f12,
         action_delay: float = 1.0,
@@ -50,6 +50,8 @@ class GameAgent:
         compressor: ContextCompressor | None = None,
         action_logger: ActionLogger | None = None,
         pvz_memory: PvZMemory | None = None,
+        include_images_in_history: bool = False,
+        include_reasoning_in_history: bool = True,
     ) -> None:
         """初始化 Agent.
 
@@ -59,7 +61,7 @@ class GameAgent:
             vlm: VLM 客户端。
             memory: 记忆管理器（可选）。
             webui: WebUI 连接管理器（可选）。
-            max_history_turns: 保留的最大历史对话轮数。
+            max_history_turns: 保留的最大历史对话轮数。"full" 保留全部，整数保留最近 N 轮。
             pause_before_think: 是否在 VLM 推理前暂停游戏。
             stop_hotkey: 全局停止热键，默认 F12。
             action_delay: 基础兜底延迟（秒），动作感知延迟会在此基础上取最大值。
@@ -71,6 +73,8 @@ class GameAgent:
             compressor: 上下文压缩器（可选），达到阈值时自动压缩历史。
             action_logger: 操作日志记录器（可选），保存截图与动作日志。
             pvz_memory: PvZ 内存读取器（可选），注入结构化游戏状态到 prompt。
+            include_images_in_history: 是否将历史截图保留在上下文中（默认关）。
+            include_reasoning_in_history: 是否将思维链加入历史上下文（默认开）。
         """
         self.capture = capture
         self.pause = pause
@@ -81,6 +85,8 @@ class GameAgent:
         self.pause_before_think = pause_before_think
         self.stop_hotkey = stop_hotkey
         self.action_delay = action_delay
+        self.include_images_in_history = include_images_in_history
+        self.include_reasoning_in_history = include_reasoning_in_history
 
         # 动作感知延迟映射表
         self._action_delays: dict[str, float] = {
@@ -289,8 +295,11 @@ class GameAgent:
                 time.sleep(self._delay_idle)
                 continue
 
-            # 将 assistant 输出加入历史
-            self._push_history_assistant(raw_output)
+            # 将 assistant 输出加入历史（可选包含思维链）
+            if self.include_reasoning_in_history and reasoning:
+                self._push_history_assistant(f"{raw_output}\n\n[思维链]\n{reasoning}")
+            else:
+                self._push_history_assistant(raw_output)
 
             # 8. 执行动作
             execution_results: list[dict[str, Any]] = []
@@ -445,13 +454,16 @@ class GameAgent:
         """限制历史轮数，防止上下文过长.
 
         保留 system + 最近 max_history_turns 轮对话。
+        当 max_history_turns 为 "full" 时不截断。
         """
         # system 消息固定在第 0 条
         system = self._history[0]
         rest = self._history[1:]
         # 一轮 = user + assistant（或 user + assistant + user 反馈）
         # 简化：按消息数截断，保留最近 max_history_turns * 3 条
-        max_msgs = self.max_history_turns * 3
+        if self.max_history_turns == "full":
+            return
+        max_msgs = int(self.max_history_turns) * 3
         if len(rest) > max_msgs:
             rest = rest[-max_msgs:]
         self._history = [system] + rest
@@ -479,6 +491,12 @@ class GameAgent:
                 texts = [p.get("text", "") for p in content if p.get("type") == "text"]
                 if texts:
                     messages.append({"role": msg["role"], "content": "\n".join(texts)})
+
+        # 若开启 include_images_in_history，将历史截图作为独立 user 消息追加
+        # 注：当前 _history 中不持久化截图，此逻辑为未来扩展预留结构
+        if self.include_images_in_history:
+            # 历史图片暂不支持（截图不持久化），仅记录日志
+            logger.debug("[Agent] include_images_in_history=True，但历史截图未持久化，暂不生效")
 
         # 最新截图作为最后一条 user 消息（数组 content，只有这里放图片）
         fmt = self.capture.config.output_format.lower() if self.capture else "png"
