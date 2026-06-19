@@ -194,7 +194,13 @@ class GameState:
     # 是否在战斗中
     @property
     def in_battle(self) -> bool:
-        return self.game_ui == GameUI.IN_GAME and self.sun >= 0
+        # game_ui 在教学关/小游戏等特殊场景不可靠（可能是 SELECT_CARD=2
+        # 而非 IN_GAME=3）。这里用"有 MainObject 且场上存在战斗实体"判定，
+        # 与 read_state/format_state 的守卫保持一致。
+        # 实体在 read_state 中赋值，未读取时为空 → in_battle=False。
+        return bool(
+            self.plants or self.zombies or self.lawn_mowers or self.grid_items
+        ) or self.game_ui == GameUI.IN_GAME
 
 
 # ================================================================== #
@@ -243,12 +249,14 @@ class PvZStateReader:
         state.game_ui = self._mem.get_game_ui()
         state.game_mode = self._mem.get_game_mode()
 
-        if state.game_ui != GameUI.IN_GAME:
-            # 不在战斗界面, 只读取 UI 状态
-            return state
-
         if not self._mem.main_object:
             return state
+
+        # 注意: game_ui 不可靠。教学关 / 小游戏等特殊场景 game_ui 可能仍是
+        # SELECT_CARD(2) 而非 IN_GAME(3)，但场上已有植物、铲子、僵尸，
+        # 实际处于"战斗中"。这里改为只要有 MainObject 就读取详细状态，
+        # 让 format_state 依据是否有实体来决定输出战斗信息，避免教学关
+        # 拿不到 plants 精确坐标、模型只能靠视觉数格子导致列号偏移。
 
         # 战斗中的详细状态
         state.sun = self._mem.get_sun()
@@ -627,12 +635,12 @@ class PvZStateReader:
         - 行内标记关键状态 (冷却/血量/异常)
         - 僵尸按行分组, 便于战略决策
         """
-        if state.game_ui != GameUI.IN_GAME:
-            ui_names = {1: "主界面", 2: "选卡界面", 3: "战斗界面"}
-            return f"游戏状态: {ui_names.get(state.game_ui, '未知')} (非战斗)"
-
         if not state.in_battle:
-            return "游戏状态: 未进入战斗"
+            ui_names = {1: "主界面", 2: "选卡界面", 3: "战斗界面"}
+            label = ui_names.get(state.game_ui, "未知")
+            # 教学关等特殊场景 game_ui=2 但实际在战斗，此时 in_battle=True，
+            # 不会走到这里；真正非战斗时才显示 UI 标签。
+            return f"游戏状态: {label} (非战斗)"
 
         lines: list[str] = []
 
