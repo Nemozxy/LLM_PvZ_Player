@@ -50,8 +50,8 @@ def _win_click(x: int, y: int, move_duration: float = 0.3) -> None:
 COL_WIDTH = 80
 PVZ_STANDARD_WIDTH = 800
 PVZ_STANDARD_HEIGHT = 600
-SHOVEL_X = 625   # 10张卡片后的铲子按钮中心 x (兜底值)
-SHOVEL_Y = 43    # 工具栏垂直居中 y
+SHOVEL_X = 755   # 铲子按钮中心 x (兜底值，教学关无卡片时使用)
+SHOVEL_Y = 50    # 工具栏垂直居中 y
 
 
 def _grid_y_by_scene(row: int, scene: int) -> int:
@@ -267,17 +267,20 @@ class PvZExecutor:
         if self._injector:
             # 1. 先释放当前鼠标选中状态
             self._injector.release_mouse()
+            time.sleep(0.05)
 
             # 2. 点击铲子按钮
             shovel_x, shovel_y = self._get_shovel_button_pos(state)
-            logger.info("[PvZ执行] 💉 点击铲子 ({},{})", shovel_x, shovel_y)
+            using_fallback = not state.seeds or not state.seeds[-1].x > 0
+            logger.info("[PvZ执行] 💉 点击铲子 ({},{}), fallback={}", shovel_x, shovel_y, using_fallback)
             self._injector.mouse_click(shovel_x, shovel_y)
-            time.sleep(0.1)
+            time.sleep(0.3)  # 等待游戏进入铲子模式
 
             # 3. 点击目标格子
             gx, gy = self._injector.grid_to_pixel(row, col)
             logger.info("[PvZ执行] 💉 点击格子 ({},{}) → ({},{})", row, col, gx, gy)
             self._injector.mouse_click(gx, gy)
+            time.sleep(0.1)
         else:
             sx, sy = game_pixel_to_screen(SHOVEL_X, SHOVEL_Y, self._get_rect)
             _win_click(sx, sy)
