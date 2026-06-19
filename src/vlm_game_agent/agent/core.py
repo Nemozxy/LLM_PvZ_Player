@@ -125,6 +125,7 @@ class GameAgent:
         self._running = False
         self._stop_listener: keyboard.Listener | None = None
         self._last_turn_time: float = 0.0  # 上一轮结束的时间戳
+        self._last_game_state_text: str = ""  # 与最新截图同步的游戏状态文本（pause 前读取）
 
     # ------------------------------------------------------------------ #
     #  主循环
@@ -189,6 +190,11 @@ class GameAgent:
                 self._notify_webui("log", f"截图失败: {exc}", "error")
                 time.sleep(1)
                 continue
+
+            # 1.5 同步读取游戏状态（与截图同一时刻，在 pause 之前）
+            # 关键: is_paused 必须在 pause 前读取。否则软暂停(esc)后读到的永远是 True，
+            # 与截图（pause 前拍的运行画面）矛盾，导致模型陷入"取消暂停"死循环。
+            self._last_game_state_text = self._read_pvz_state()
 
             # 2. 检查 WebUI 用户指令
             user_cmd = self._fetch_user_command()
@@ -510,8 +516,8 @@ class GameAgent:
         # 注入上一轮操作摘要，让模型有持续性记忆
         last_turn_summary = self._build_last_turn_summary(execution_results=self._last_execution_results)
 
-        # 注入 PvZ 内存读取的游戏状态
-        game_state_text = self._read_pvz_state()
+        # 注入 PvZ 内存读取的游戏状态（与最新截图同步，已在主循环截图后读取并缓存）
+        game_state_text = self._last_game_state_text
 
         # 构建用户消息
         user_text_parts = [time_hint]

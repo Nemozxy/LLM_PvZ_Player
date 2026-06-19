@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     capture_area: str = "client"  # client / window
 
     # ========== 时停控制 ==========
-    pause_strategy: str = "hard"  # soft / hard / focus
+    # soft: 软暂停(esc键)。游戏始终在前台，esc 进/出暂停菜单，pyautogui 点击能被游戏正常接收。
+    # PvZ 不推荐 focus(失焦会弹"返回游戏"按钮) 和 hard(挂起进程恢复后未必在前台)。
+    pause_strategy: str = "soft"  # soft / hard / focus
     pause_hotkey: str = "esc"
     resume_hotkey: str = "esc"
 
