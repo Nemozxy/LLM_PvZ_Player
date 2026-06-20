@@ -76,8 +76,8 @@ class ActionLogger:
             raw_output: VLM 原始输出。
             tool_calls: 解析出的 ToolCall 列表。
             execution_results: 每个动作的执行结果列表。
-            elapsed_seconds: 距上一轮的间隔。
-            wait_seconds: 本轮等待时间。
+            elapsed_seconds: 本轮从上一轮结束到日志写入时的总耗时。
+            wait_seconds: 本轮末尾用于等待画面变化的后置观察等待时间。
         """
         if self._session_dir is None or self._md_path is None:
             return
@@ -88,11 +88,14 @@ class ActionLogger:
         # 保存截图
         img_path = self._save_image(img_b64)
 
+        non_wait_seconds = max(0.0, elapsed_seconds - wait_seconds)
+
         # 追加 Markdown
         with self._md_path.open("a", encoding="utf-8") as f:
             f.write(f"## 第 {self._turn} 轮 — {timestamp}\n\n")
-            f.write(f"- 距上一轮: {elapsed_seconds:.1f}s\n")
-            f.write(f"- 等待时间: {wait_seconds:.1f}s\n\n")
+            f.write(f"- 本轮总耗时: {elapsed_seconds:.1f}s\n")
+            f.write(f"- 后置观察等待: {wait_seconds:.1f}s\n")
+            f.write(f"- 推理与执行耗时: {non_wait_seconds:.1f}s\n\n")
 
             if img_path:
                 f.write(f"![截图]({img_path})\n\n")

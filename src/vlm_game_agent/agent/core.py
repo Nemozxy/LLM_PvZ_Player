@@ -285,7 +285,8 @@ class GameAgent:
                 logger.warning("[Agent] 未解析到有效动作")
                 self._notify_webui("log", "未解析到动作，继续观察", "warning")
                 self._push_history_assistant(raw_output)
-                # 记录无动作日志
+                # 无动作轮也先完成后置观察等待，再记录真实总耗时
+                time.sleep(self._delay_idle)
                 if self._action_logger:
                     now = time.perf_counter()
                     elapsed = now - self._last_turn_time
@@ -298,7 +299,7 @@ class GameAgent:
                         elapsed_seconds=elapsed,
                         wait_seconds=self._delay_idle,
                     )
-                time.sleep(self._delay_idle)
+                self._last_turn_time = time.perf_counter()
                 continue
 
             # 将 assistant 输出加入历史（可选包含思维链）
