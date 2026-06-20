@@ -664,7 +664,59 @@ class GameAgent:
         except Exception as exc:
             return {"action": action, "status": "error", "error": f"读取游戏状态失败: {exc}"}
 
-        return self._pvz_executor.execute(action, args, state)
+        expected_plant_type: int | None = None
+        expected_plant_name = ""
+        if action == "place_plant":
+            card_index = args.get("card_index")
+            if isinstance(card_index, int) and 0 <= card_index < len(state.seeds):
+                seed = state.seeds[card_index]
+                expected_plant_type = seed.plant_type
+                expected_plant_name = seed.name
+
+        result = self._pvz_executor.execute(action, args, state)
+        if result.get("status") == "ok" and action == "place_plant":
+            self._verify_pvz_place_plant(args, result, expected_plant_type, expected_plant_name)
+        return result
+
+    def _verify_pvz_place_plant(
+        self,
+        args: dict[str, Any],
+        result: dict[str, Any],
+        expected_plant_type: int | None,
+        expected_plant_name: str,
+    ) -> None:
+        """验证种植动作是否真的落到目标格。"""
+        if not self._pvz_reader:
+            return
+        row = args.get("row")
+        col = args.get("col")
+        if row is None or col is None:
+            return
+
+        time.sleep(0.2)
+        try:
+            state = self._pvz_reader.read_state()
+        except Exception as exc:
+            result["status"] = "error"
+            result["error"] = f"种植后验证失败: {exc}"
+            return
+
+        for plant in state.plants:
+            if plant.row == row and plant.col == col:
+                if expected_plant_type is None or plant.plant_type == expected_plant_type:
+                    result["verified"] = True
+                    result["detail"] = f"已验证种植 {plant.name} 到 行{row}列{col}"
+                    return
+                result["status"] = "error"
+                result["error"] = (
+                    f"种植后验证失败: 行{row}列{col} 是 {plant.name}，"
+                    f"预期 {expected_plant_name or expected_plant_type}"
+                )
+                return
+
+        result["status"] = "error"
+        result["error"] = f"种植后验证失败: 行{row}列{col} 未发现 {expected_plant_name or '目标植物'}"
+
     def _get_client_rect(self) -> tuple[int, int, int, int]:
         """返回窗口客户区屏幕坐标 (left, top, right, bottom)."""
         # 复用 capture 中的客户区计算逻辑
