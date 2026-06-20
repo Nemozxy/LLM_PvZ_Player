@@ -30,11 +30,12 @@ PVZ_ACTION_SCHEMA = {
                         "* `collect_sun`：收集阳光。点击场上的阳光。\n"
                         "* `click_card`：选中一张卡片（暂不放置，用于后续操作）。\n"
                         "* `use_cob_cannon`：使用玉米加农炮。先点击炮台，再点击落点。\n"
-                        "* `win_level`：直接通关当前关卡（跳过）。用于跳过 AI 难以胜任的实时小游戏。"
+                        "* `win_level`：直接通关当前关卡（跳过）。用于跳过 AI 难以胜任的实时小游戏。\n"
+                        "* `select_seeds`：选卡界面选卡并开始游戏。传入植物类型列表，自动选卡+随机补满+开始。"
                     ),
                     "enum": [
                         "place_plant", "shovel", "collect_sun",
-                        "click_card", "use_cob_cannon", "win_level",
+                        "click_card", "use_cob_cannon", "win_level", "select_seeds",
                     ],
                 },
                 "card_index": {
@@ -60,6 +61,11 @@ PVZ_ACTION_SCHEMA = {
                 "index": {
                     "type": "string",
                     "description": "仅 collect_sun 需要。收集第几个阳光 (0-based 整数)，或 \"all\" 收集所有阳光。默认 \"all\"。",
+                },
+                "seeds": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "仅 select_seeds 需要。植物类型列表，如 [0,1,3,5]。类型对照见下方植物类型表。",
                 },
             },
         },
@@ -223,19 +229,36 @@ def build_system_prompt(
 - 玉米炮 → `pvz_action` (use_cob_cannon)
 - 选中卡片 → `pvz_action` (click_card)
 - 跳过实时小游戏 → `pvz_action` (win_level)
+- 选卡界面选卡开始 → `pvz_action` (select_seeds)
 
 ⚠ **实时小游戏直接跳过**：坚果保龄球、传送带关卡等对实时性要求极高，AI 的反应速度跟不上，强行玩必然失败。识别到这类关卡（传送带上有移动的卡片、保龄球玩法等）时，直接调用 `win_level` 跳过，不要浪费时间尝试。
+
+⚠ **选卡界面用 select_seeds，不要用 computer_use 点卡片**：选卡界面（"选择你的植物"+"一起摇摆吧！"按钮）直接调 `select_seeds` 传入植物类型列表，程序自动选卡+开始游戏。不要用 computer_use 视觉点击卡片（坐标会偏）。
 
 注意：**阳光会由程序自动收集**，无需手动点击阳光或调用 collect_sun。
 
 如果 `pvz_action` 执行失败（如无卡片数据、特殊关卡布局），回退到 `computer_use` 用鼠标点击截图中的对应位置。
 
 只有以下情况使用 `computer_use`：
-- 点击菜单、按钮等非战斗 UI 元素（如选卡界面、关卡选择、小游戏传送带）
+- 点击菜单、按钮等非战斗 UI 元素（如关卡选择界面）
 - 按键盘快捷键
 - 需要等待 (wait)
 - 结束任务 (terminate)
 - `pvz_action` 无效时的回退方案
+
+### 植物类型表（select_seeds 的 seeds 参数用此编号）
+
+```
+0=豌豆射手 1=向日葵 2=樱桃炸弹 3=坚果 4=土豆地雷 5=寒冰射手
+6=大嘴花 7=双发射手 8=小喷菇 9=阳光菇 10=大喷菇 11=墓碑吞噬者
+12=魅惑菇 13=胆小菇 14=寒冰菇 15=毁灭菇 16=荷叶 17=倭瓜
+18=三发射手 19=缠绕海藻 20=火爆辣椒 21=地刺 22=火炬树桩 23=高坚果
+24=水兵菇 25=路灯花 26=仙人掌 27=三叶草 28=裂荚射手 29=杨桃
+30=南瓜头 31=磁力菇 32=卷心菜投手 33=花盆 34=玉米投手 35=咖啡豆
+36=大蒜 37=叶子保护伞 38=金盏花 39=西瓜投手 40=机枪射手 41=双子向日葵
+42=忧郁菇 43=香蒲 44=冰西瓜投手 45=吸金磁 46=地刺王 47=玉米加农炮
+```
+生存模式推荐选卡（白天）：向日葵(1)、豌豆射手(0)、坚果(3)、寒冰射手(5)、樱桃炸弹(2)、土豆地雷(4)、双发射手(7)、火爆辣椒(20)。
 
 ### PvZ 动作示例
 
@@ -262,6 +285,11 @@ def build_system_prompt(
 直接通关跳过当前关卡（如坚果保龄球等实时小游戏）：
 <tool_call>
 {{"name": "pvz_action", "arguments": {{"action": "win_level"}}}}
+</tool_call>
+
+选卡界面选卡并开始游戏（传入植物类型列表，程序自动选卡+随机补满+开始）：
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "select_seeds", "seeds": [1, 0, 3, 5, 2, 4, 7, 20]}}}}
 </tool_call>
 
 一回合内多种植物 + 等待：

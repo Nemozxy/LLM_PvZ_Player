@@ -132,7 +132,7 @@ class PvZExecutor:
         """判断是否为 PvZ 专属动作."""
         return action in (
             "place_plant", "shovel", "collect_sun",
-            "use_cob_cannon", "click_card", "win_level",
+            "use_cob_cannon", "click_card", "win_level", "select_seeds",
         )
 
     def execute(self, action: str, args: dict[str, Any], state: GameState) -> dict[str, Any]:
@@ -153,6 +153,8 @@ class PvZExecutor:
                 self._use_cob_cannon(args, state, result)
             elif action == "win_level":
                 self._win_level(args, state, result)
+            elif action == "select_seeds":
+                self._select_seeds(args, state, result)
             else:
                 raise ValueError(f"未知 PvZ 动作: {action}")
         except Exception as exc:
@@ -367,6 +369,42 @@ class PvZExecutor:
             raise RuntimeError("直接通关需要代码注入器，当前未启用")
 
         result["detail"] = "已触发直接通关"
+
+    def _select_seeds(self, args: dict, state: GameState, result: dict) -> None:
+        """选卡界面: 选择植物并开始游戏.
+
+        传入植物类型列表，程序用游戏内部函数逐张选卡，再随机填满剩余
+        卡槽，最后开始游戏。完全绕过视觉坐标点击，避免选卡界面点不准。
+
+        Args (从 args 读):
+            seeds: 植物类型列表 (0~47)，如 [0, 1, 3, 5]。
+        """
+        seeds = args.get("seeds")
+        if not seeds or not isinstance(seeds, list):
+            raise ValueError("select_seeds 需要 seeds 参数（植物类型列表，如 [0,1,3]）")
+
+        if not self._injector:
+            raise RuntimeError("选卡需要代码注入器，当前未启用")
+
+        # 逐张选卡。任何一张失败都应中止，避免带着残缺/错误的卡组继续
+        # pick_random_seeds → rock，那样会用错误的植物开局却误以为成功了。
+        chosen: list[int] = []
+        for plant_type in seeds:
+            try:
+                self._injector.choose_card(int(plant_type))
+                chosen.append(int(plant_type))
+            except Exception as exc:
+                logger.error("[PvZ执行] 选卡 {} 失败，中止选卡: {}", plant_type, exc)
+                raise RuntimeError(f"选卡失败 (植物 {plant_type}): {exc}") from exc
+
+        # 随机填满剩余卡槽
+        self._injector.pick_random_seeds()
+
+        # 开始游戏
+        self._injector.rock()
+
+        result["detail"] = f"已选卡 {len(chosen)} 张 {chosen} 并开始游戏"
+        result["seeds"] = chosen
 
     # ------------------------------------------------------------------ #
     #  内部工具

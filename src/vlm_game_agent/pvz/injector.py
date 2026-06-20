@@ -90,6 +90,17 @@ FUNC_RELEASE_MOUSE = 0x40CD80
 # 调用约定: ECX = Board*, 无参数 (thiscall，与 ReleaseMouse 仅寄存器不同)
 FUNC_FADE_OUT_LEVEL = 0x41B8D0
 
+# ---- 选卡界面函数 (来自 AsmVsZombies avz_asm.cpp, V1_0_0_1051_EN) ----
+# SelectCardUi_p 偏移: PvzBase + 0x774 (选卡界面 UI 对象)
+SELECT_CARD_UI_OFFSET = 0x774
+# ChooseCard(card_entry_ptr): 把植物加入卡组。参数是卡片条目地址
+# (SelectCardUi_p + 0xa4 + cardType*0x3c)，而非植物类型本身。
+FUNC_CHOOSE_CARD = 0x486030
+# Rock(): 开始游戏 (等价点"一起摇摆吧！"按钮)。esi=PvzBase, edi=1, ebp=1
+FUNC_ROCK = 0x486D20
+# PickRandomSeeds(): 随机填满剩余空卡槽 (等价点调试试玩按钮)
+FUNC_PICK_RANDOM_SEEDS = 0x4859B0
+
 # GridToAbscissa(row, col) → x 像素坐标
 # ECX = Board*, EAX = col, ESI = row
 FUNC_GRID_TO_ABSCISSA = 0x41C680
@@ -624,6 +635,100 @@ class PvZCodeInjector:
         code += b'\xBA' + struct.pack('<I', FUNC_FADE_OUT_LEVEL)
         # call edx
         code += b'\xFF\xD2'
+        # ret
+        code += b'\xC3'
+        self._inject_and_execute(bytes(code))
+        time.sleep(0.05)
+
+    def choose_card(self, plant_type: int) -> None:
+        """选卡界面: 把指定植物加入卡组.
+
+        对应 AsmVsZombies AAsm::ChooseCard (avz_asm.cpp:258-275)。
+        传入植物类型 (0~47)，内部计算卡片条目地址后调用游戏函数。
+        必须在选卡界面 (game_ui=2) 调用。
+
+        Args:
+            plant_type: 植物类型 ID (0=豌豆射手, 1=向日葵, ...)。
+        """
+        logger.info("[注入] ChooseCard 植物类型={}", plant_type)
+        code = bytearray()
+        # mov eax, [PVZ_BASE]  (eax = PvzBase 对象指针，0x6a9ec0 处即对象本身)
+        # 注意: [PVZ_BASE] 已经是 PvzBase 对象，不可再 mov eax,[eax] 二次解引用，
+        # 否则会读到对象头部的 vtable 指针，后续 [eax+0x774] 越界访问 .text 段导致崩溃。
+        # 与 PickRandomSeeds 的解引用层数一致 (共 2 层)。
+        code += b'\xA1' + struct.pack('<I', PVZ_BASE)
+        # mov eax, [eax + SELECT_CARD_UI_OFFSET]  ; eax = SelectCardUi_p
+        code += b'\x8B\x80' + struct.pack('<I', SELECT_CARD_UI_OFFSET)
+        # mov edx, plant_type
+        code += b'\xBA' + struct.pack('<i', plant_type)
+        # shl edx, 4
+        code += b'\xC1\xE2\x04'
+        # sub edx, plant_type  (edx = plant_type * 15)
+        code += b'\x81\xEA' + struct.pack('<i', plant_type)
+        # shl edx, 2  (edx = plant_type * 60 = plant_type * 0x3c)
+        code += b'\xC1\xE2\x02'
+        # add edx, 0xa4
+        code += b'\x81\xC2\xA4\x00\x00\x00'
+        # add edx, eax  (edx = SelectCardUi_p + 0xa4 + plant_type*0x3c)
+        code += b'\x01\xC2'
+        # push edx
+        code += b'\x52'
+        # mov ecx, FUNC_CHOOSE_CARD
+        code += b'\xB9' + struct.pack('<I', FUNC_CHOOSE_CARD)
+        # call ecx
+        code += b'\xFF\xD1'
+        # ret
+        code += b'\xC3'
+        self._inject_and_execute(bytes(code))
+        time.sleep(0.2)  # 等待选卡动画
+
+    def pick_random_seeds(self) -> None:
+        """选卡界面: 随机填满剩余空卡槽.
+
+        对应 AsmVsZombies AAsm::PickRandomSeeds (avz_asm.cpp:887-897)。
+        等价于点击选卡界面的"调试试玩"按钮，会随机填充未选的卡槽。
+        用于选卡数量不足卡槽上限时补满。
+        """
+        logger.info("[注入] PickRandomSeeds 随机填满卡槽")
+        code = bytearray()
+        # mov eax, [PVZ_BASE]
+        code += b'\xA1' + struct.pack('<I', PVZ_BASE)
+        # mov eax, [eax + SELECT_CARD_UI_OFFSET]  ; eax = SelectCardUi_p
+        code += b'\x8B\x80' + struct.pack('<I', SELECT_CARD_UI_OFFSET)
+        # push eax
+        code += b'\x50'
+        # mov ecx, FUNC_PICK_RANDOM_SEEDS
+        code += b'\xB9' + struct.pack('<I', FUNC_PICK_RANDOM_SEEDS)
+        # call ecx
+        code += b'\xFF\xD1'
+        # ret
+        code += b'\xC3'
+        self._inject_and_execute(bytes(code))
+        time.sleep(0.5)  # 等待随机选卡动画完成
+
+    def rock(self) -> None:
+        """选卡界面: 开始游戏 (等价点"一起摇摆吧！"按钮).
+
+        对应 AsmVsZombies AAsm::Rock (avz_asm.cpp:111-123)。
+        调用后游戏从选卡界面进入战斗。卡组未满时调用可能无效，
+        建议先 pick_random_seeds 补满。
+        """
+        logger.info("[注入] Rock 开始游戏")
+        code = bytearray()
+        # mov ebx, [PVZ_BASE]
+        code += b'\x8B\x1D' + struct.pack('<I', PVZ_BASE)
+        # mov ebx, [ebx + SELECT_CARD_UI_OFFSET]  ; ebx = SelectCardUi_p
+        code += b'\x8B\x9B' + struct.pack('<I', SELECT_CARD_UI_OFFSET)
+        # mov esi, [PVZ_BASE]  (Rock 内部用 esi=PvzBase)
+        code += b'\x8B\x35' + struct.pack('<I', PVZ_BASE)
+        # mov edi, 1
+        code += b'\xBF\x01\x00\x00\x00'
+        # mov ebp, 1
+        code += b'\xBD\x01\x00\x00\x00'
+        # mov eax, FUNC_ROCK
+        code += b'\xB8' + struct.pack('<I', FUNC_ROCK)
+        # call eax
+        code += b'\xFF\xD0'
         # ret
         code += b'\xC3'
         self._inject_and_execute(bytes(code))
