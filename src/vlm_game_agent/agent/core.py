@@ -332,7 +332,13 @@ class GameAgent:
                     result = self._executor.execute(action, tc.arguments)
                 execution_results.append(result)
                 translated = self._translate_action(action, tc.arguments)
-                self._notify_webui("action", action, translated)
+                # 推送动作 + 执行结果到 WebUI
+                action_status = result.get("status", "ok")
+                action_result_text = result.get("error") or result.get("detail", "")
+                self._notify_webui(
+                    "action", action, translated,
+                    status=action_status, result_text=action_result_text,
+                )
 
                 # 把执行结果反馈加入历史
                 if result.get("status") == "error":
@@ -548,8 +554,23 @@ class GameAgent:
     # ------------------------------------------------------------------ #
     #  WebUI 交互
     # ------------------------------------------------------------------ #
-    def _notify_webui(self, msg_type: str, data: str, detail: str = "") -> None:
-        """向 WebUI 推送消息（非阻塞）."""
+    def _notify_webui(
+        self,
+        msg_type: str,
+        data: str,
+        detail: str = "",
+        status: str = "ok",
+        result_text: str = "",
+    ) -> None:
+        """向 WebUI 推送消息（非阻塞）.
+
+        Args:
+            msg_type: 消息类型 ("frame" / "log" / "action")。
+            data: 主数据（frame 为 base64，log 为文本，action 为动作名）。
+            detail: log 的级别或 action 的翻译描述。
+            status: action 的执行状态 ("ok" / "error")。
+            result_text: action 的执行结果详情。
+        """
         if self.webui is None or self.webui._loop is None:
             return
         loop = self.webui._loop
@@ -561,7 +582,7 @@ class GameAgent:
             )
         elif msg_type == "action":
             asyncio.run_coroutine_threadsafe(
-                self.webui.push_action(data, detail), loop
+                self.webui.push_action(data, detail, status, result_text), loop
             )
 
     def _fetch_user_command(self) -> str | None:

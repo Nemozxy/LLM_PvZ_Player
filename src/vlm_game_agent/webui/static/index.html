@@ -372,7 +372,17 @@
           } else if (msg.type === 'log') {
             this.addLog('', msg.text, msg.level || 'info');
           } else if (msg.type === 'action') {
-            this.addLog('动作', `${msg.action}: ${msg.detail}`, 'action');
+            const status = msg.status || 'ok';
+            const resultText = msg.result || '';
+            let displayText = `${msg.action}: ${msg.detail}`;
+            let level = 'action';
+            if (status === 'error') {
+              displayText += ` ❌ 失败${resultText ? ' - ' + resultText : ''}`;
+              level = 'error';
+            } else {
+              displayText += ` ✅${resultText ? ' ' + resultText : ' 成功'}`;
+            }
+            this.addLog('动作', displayText, level);
           } else if (msg.type === 'prompt') {
             this.addLog('', msg.text, msg.subtype || 'prompt');
           } else if (msg.type === 'pong') {

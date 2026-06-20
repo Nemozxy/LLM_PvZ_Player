@@ -60,9 +60,28 @@ class ConnectionManager:
         """推送一条日志/思考流."""
         await self.broadcast({"type": "log", "level": level, "text": text})
 
-    async def push_action(self, action: str, detail: str) -> None:
-        """推送一条操作流水记录."""
-        await self.broadcast({"type": "action", "action": action, "detail": detail})
+    async def push_action(
+        self,
+        action: str,
+        detail: str,
+        status: str = "ok",
+        result_text: str = "",
+    ) -> None:
+        """推送一条操作流水记录（含执行结果）.
+
+        Args:
+            action: 动作名称。
+            detail: 动作描述（翻译后的中文）。
+            status: 执行状态，"ok" 表示成功，"error" 表示失败。
+            result_text: 执行结果详情（失败原因或成功细节）。
+        """
+        await self.broadcast({
+            "type": "action",
+            "action": action,
+            "detail": detail,
+            "status": status,
+            "result": result_text,
+        })
 
     async def push_prompt(self, text: str, msg_type: str = "prompt") -> None:
         """推送 prompt 到 WebUI（不含图片和历史上下文）.
