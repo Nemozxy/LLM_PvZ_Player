@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any, Callable
 
 import pyautogui
@@ -125,7 +124,6 @@ class ActionExecutor:
 
             elif action == "wait":
                 seconds = args.get("time", 1.0)
-                time.sleep(seconds)
                 result["waited"] = seconds
 
             elif action == "terminate":
