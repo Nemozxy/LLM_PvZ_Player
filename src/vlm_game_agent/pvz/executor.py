@@ -128,6 +128,18 @@ class PvZExecutor:
         """获取注入器实例（用于外部调用 hack 开关等）."""
         return self._injector
 
+    def pause_for_thinking(self) -> None:
+        """冻结 PvZ 主循环，用于 VLM 推理期间暂停游戏。"""
+        if not self._injector:
+            raise RuntimeError("PvZ 注入器未启用，无法冻结主循环")
+        self._injector.set_main_loop_blocked(True)
+
+    def resume_after_thinking(self) -> None:
+        """恢复 PvZ 主循环，对应 pause_for_thinking。"""
+        if not self._injector:
+            raise RuntimeError("PvZ 注入器未启用，无法恢复主循环")
+        self._injector.set_main_loop_blocked(False)
+
     def can_execute(self, action: str) -> bool:
         """判断是否为 PvZ 专属动作."""
         return action in (
@@ -191,6 +203,8 @@ class PvZExecutor:
         seed = state.seeds[card_index]
         if not seed.is_ready:
             raise ValueError(f"卡片 [{card_index}] {seed.name} 未就绪 (冷却中或不可用)")
+        if state.sun < seed.sun_cost:
+            raise ValueError(f"卡片 [{card_index}] {seed.name} 需要 {seed.sun_cost} 阳光，当前只有 {state.sun}")
 
         if self._injector:
             # 注入模式: MouseClick 点卡片 + 点格子

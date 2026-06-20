@@ -815,6 +815,15 @@ class PvZCodeInjector:
             self.disable_hack("auto_collected", HACK_AUTO_COLLECTED)
             logger.info("[注入] 自动收集阳光 已关闭")
 
+    def set_main_loop_blocked(self, on: bool) -> None:
+        """开启/关闭游戏主循环冻结，用于 Agent 思考期间暂停游戏。"""
+        if on:
+            self.enable_hack("block_main_loop", HACK_BLOCK_MAIN_LOOP)
+            logger.info("[注入] 游戏主循环 已冻结")
+        else:
+            self.disable_hack("block_main_loop", HACK_BLOCK_MAIN_LOOP)
+            logger.info("[注入] 游戏主循环 已恢复")
+
     def set_unlock_sun_limit(self, on: bool) -> None:
         """开启/关闭阳光上限解锁."""
         if on:

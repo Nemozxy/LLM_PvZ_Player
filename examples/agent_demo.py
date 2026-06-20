@@ -55,16 +55,15 @@ def setup_pause_controller(
 
 def main() -> None:
     settings = Settings()
-    pvz_soft_pause_disabled = settings.pvz_memory_enabled and settings.pause_strategy == "soft"
-    effective_pause_before_think = settings.agent_pause_before_think and not pvz_soft_pause_disabled
-    use_soft_pause = settings.pause_strategy == "soft" and effective_pause_before_think
+    pvz_injection_pause = settings.pvz_memory_enabled and settings.pause_strategy == "soft"
+    use_soft_pause = settings.pause_strategy == "soft" and not pvz_injection_pause
 
-    if pvz_soft_pause_disabled:
-        print("PvZ 内存模式下已禁用 soft/esc 思考前暂停，避免暂停菜单污染截图。")
+    if pvz_injection_pause:
+        print("PvZ 内存模式下将使用注入式主循环冻结，避免 Esc 暂停菜单污染截图。")
 
     # 1. 截图器
-    # 只有真正启用软暂停时才避免截图前切前台；PvZ 内存模式会禁用 soft/esc 暂停，
-    # 因此需要恢复截图前切前台，保证截到运行中的游戏画面而不是旧菜单。
+    # 通用 soft 暂停会自行切前台；PvZ 内存模式不发 Esc，改由注入冻结主循环，
+    # 因此截图前仍需要切前台，保证截到运行中的游戏画面。
     cap = WindowCapture(
         config=CaptureConfig(
             scale=settings.capture_scale,
@@ -166,7 +165,7 @@ def main() -> None:
         memory=memory,
         webui=webui_manager,
         max_history_turns=settings.agent_max_history_turns,
-        pause_before_think=effective_pause_before_think,
+        pause_before_think=settings.agent_pause_before_think,
         action_delay=settings.agent_action_delay,
         delay_click=settings.agent_delay_click,
         delay_drag=settings.agent_delay_drag,

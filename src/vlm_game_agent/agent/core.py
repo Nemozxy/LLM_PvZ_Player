@@ -202,10 +202,10 @@ class GameAgent:
                 self._inject_user_command(user_cmd)
                 self._notify_webui("log", f"人工指令: {user_cmd}", "user")
 
-            # 3. 时停（软/硬暂停）
+            # 3. 时停（PvZ 优先用注入冻结主循环，避免 Esc 菜单污染）
             if self.pause_before_think:
                 try:
-                    self.pause.pause()
+                    self._pause_for_thinking()
                 except Exception as exc:
                     logger.warning("[Agent] 暂停失败: {}", exc)
 
@@ -253,14 +253,14 @@ class GameAgent:
                 logger.error("[Agent] VLM 调用失败: {}", exc)
                 self._notify_webui("log", f"VLM 失败: {exc}", "error")
                 if self.pause_before_think:
-                    self.pause.resume()
+                    self._resume_after_thinking()
                 time.sleep(2)
                 continue
 
             # 6. 恢复游戏
             if self.pause_before_think:
                 try:
-                    self.pause.resume()
+                    self._resume_after_thinking()
                 except Exception as exc:
                     logger.warning("[Agent] 恢复失败: {}", exc)
 
@@ -600,6 +600,54 @@ class GameAgent:
     # ------------------------------------------------------------------ #
     #  辅助
     # ------------------------------------------------------------------ #
+    def _pause_for_thinking(self) -> None:
+        """进入推理前暂停游戏.
+
+        PvZ 模式优先使用注入器冻结游戏主循环，避免 Esc 暂停菜单污染画面；
+        非 PvZ 或注入暂停不可用时回退到通用 PauseController。
+        """
+        if self._pvz_executor:
+            for method_name in (
+                "pause_for_thinking",
+                "freeze_for_thinking",
+                "freeze_main_loop",
+                "pause_game",
+                "freeze_game",
+                "pause",
+                "freeze",
+            ):
+                method = getattr(self._pvz_executor, method_name, None)
+                if callable(method):
+                    method()
+                    logger.debug("[Agent] PvZ 注入暂停已启用: {}", method_name)
+                    return
+            logger.debug("[Agent] PvZ 执行器不支持注入暂停，回退通用暂停")
+        self.pause.pause()
+
+    def _resume_after_thinking(self) -> None:
+        """推理结束后恢复游戏.
+
+        与 _pause_for_thinking 对应：PvZ 模式优先解除注入冻结；
+        非 PvZ 或注入恢复不可用时回退到通用 PauseController。
+        """
+        if self._pvz_executor:
+            for method_name in (
+                "resume_after_thinking",
+                "unfreeze_after_thinking",
+                "unfreeze_main_loop",
+                "resume_game",
+                "unfreeze_game",
+                "resume",
+                "unfreeze",
+            ):
+                method = getattr(self._pvz_executor, method_name, None)
+                if callable(method):
+                    method()
+                    logger.debug("[Agent] PvZ 注入暂停已解除: {}", method_name)
+                    return
+            logger.debug("[Agent] PvZ 执行器不支持注入恢复，回退通用恢复")
+        self.pause.resume()
+
     def _read_pvz_state(self) -> str:
         """从 PvZ 内存读取游戏状态文本.
 
@@ -699,7 +747,7 @@ class GameAgent:
         if row is None or col is None:
             return
 
-        time.sleep(0.2)
+        time.sleep(0.3)
         try:
             state = self._pvz_reader.read_state()
         except Exception as exc:
