@@ -65,7 +65,7 @@ class ConnectionManager:
         await self.broadcast({"type": "action", "action": action, "detail": detail})
 
     async def push_prompt(self, text: str) -> None:
-        """推送一轮发给 AI 的 user prompt 内容（不含图片）."""
+        """推送本轮 system + user prompt 到 WebUI（不含图片和历史上下文）."""
         await self.broadcast({"type": "prompt", "text": text})
 
     # ------------------------------------------------------------------ #

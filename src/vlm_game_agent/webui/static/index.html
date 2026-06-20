@@ -226,7 +226,7 @@
           <template v-if="log.level === 'prompt'">
             <div class="prompt-header">
               <span class="prompt-arrow" :class="{ open: log.expanded }">▶</span>
-              <span>📤 User Prompt (点击展开)</span>
+              <span>📤 Prompt (点击展开)</span>
             </div>
             <div v-if="log.expanded" class="prompt-body">{{ log.text }}</div>
           </template>

@@ -571,30 +571,35 @@ class GameAgent:
         return self.webui.get_command()
 
     def _push_prompt_to_webui(self, messages: list[dict[str, Any]]) -> None:
-        """推送本轮 prompt 摘要到 WebUI（默认折叠）.
+        """推送本轮 system + user prompt 到 WebUI（默认折叠）.
 
-        提取发给 AI 的文本内容（跳过图片），方便调试查看 AI 收到了什么。
+        只显示系统提示词和本轮用户提示词，不包含历史上下文。
         """
         if self.webui is None or self.webui._loop is None:
             return
         parts: list[str] = []
+
+        # 取第一条 system 消息
         for msg in messages:
-            role = msg.get("role", "?")
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                # 数组 content，提取文本部分（跳过 image_url）
-                texts = [p.get("text", "") for p in content if p.get("type") == "text"]
-                content = "\n".join(texts)
-            if not isinstance(content, str) or not content.strip():
-                continue
-            # system 消息太长，只截取首行摘要
-            if role == "system":
-                first_line = content.strip().split("\n")[0]
-                parts.append(f"[system] {first_line}...")
-            else:
-                parts.append(f"[{role}] {content}")
+            if msg.get("role") == "system":
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    parts.append(f"[system] {content}")
+                break
+
+        # 取最后一条 user 消息
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    texts = [p.get("text", "") for p in content if p.get("type") == "text"]
+                    content = "\n".join(texts)
+                if isinstance(content, str) and content.strip():
+                    parts.append(f"[user] {content}")
+                break
+
         if parts:
-            text = "\n".join(parts)
+            text = "\n\n---\n\n".join(parts)
             asyncio.run_coroutine_threadsafe(self.webui.push_prompt(text), self.webui._loop)
 
     # ------------------------------------------------------------------ #
