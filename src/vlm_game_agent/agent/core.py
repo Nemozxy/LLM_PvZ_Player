@@ -101,7 +101,6 @@ class GameAgent:
             # PvZ 专用动作延迟
             "place_plant": delay_click,
             "shovel": delay_click,
-            "collect_sun": delay_click,
             "click_card": delay_click,
             "use_cob_cannon": delay_click,
         }
@@ -619,8 +618,6 @@ class GameAgent:
             row = args.get("row", "?")
             col = args.get("col", "?")
             return f"铲除 行{row}列{col} 的植物"
-        if action == "collect_sun":
-            return "收集阳光"
         if action == "use_cob_cannon":
             row = args.get("row", "?")
             col = args.get("col", "?")
@@ -780,7 +777,7 @@ class GameAgent:
         """执行 PvZ 专属动作，需要先读取最新游戏状态.
 
         Args:
-            action: PvZ 动作名称 (place_plant / shovel / collect_sun / ...).
+            action: PvZ 动作名称 (place_plant / shovel / click_card / ...).
             args: 动作参数。
 
         Returns:

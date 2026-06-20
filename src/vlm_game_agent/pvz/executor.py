@@ -143,7 +143,7 @@ class PvZExecutor:
     def can_execute(self, action: str) -> bool:
         """判断是否为 PvZ 专属动作."""
         return action in (
-            "place_plant", "shovel", "collect_sun",
+            "place_plant", "shovel",
             "use_cob_cannon", "click_card", "win_level", "select_seeds",
         )
 
@@ -159,8 +159,6 @@ class PvZExecutor:
                 self._click_card(args, state, result)
             elif action == "shovel":
                 self._shovel(args, state, result)
-            elif action == "collect_sun":
-                self._collect_sun(args, state, result)
             elif action == "use_cob_cannon":
                 self._use_cob_cannon(args, state, result)
             elif action == "win_level":
@@ -309,39 +307,6 @@ class PvZExecutor:
 
         result["detail"] = f"铲除 行{row}列{col} 的植物"
         result["grid"] = (row, col)
-
-    def _collect_sun(self, args: dict, state: GameState, result: dict) -> None:
-        """收集阳光."""
-        index = args.get("index", 0)
-
-        if index == "all":
-            sun_items = [it for it in state.items if it.is_sun and not it.is_collected]
-            if not sun_items:
-                result["detail"] = "没有可收集的阳光"
-                return
-            if self._injector:
-                coords = [(int(it.x), int(it.y)) for it in sun_items]
-                count = self._injector.collect_all_sun(coords)
-            else:
-                count = 0
-                for it in sun_items[:5]:
-                    sx, sy = game_pixel_to_screen(int(it.x), int(it.y), self._get_rect)
-                    _win_click(sx, sy, move_duration=0.15)
-                    count += 1
-                    time.sleep(0.08)
-            result["detail"] = f"收集了 {count} 个阳光"
-        else:
-            sun_items = [it for it in state.items if it.is_sun and not it.is_collected]
-            if not sun_items:
-                raise ValueError("当前没有可收集的阳光")
-            idx = min(int(index), len(sun_items) - 1)
-            it = sun_items[idx]
-            if self._injector:
-                self._injector.collect_sun_at(int(it.x), int(it.y))
-            else:
-                sx, sy = game_pixel_to_screen(int(it.x), int(it.y), self._get_rect)
-                _win_click(sx, sy, move_duration=0.2)
-            result["detail"] = f"收集阳光 ({int(it.x)},{int(it.y)})"
 
     def _use_cob_cannon(self, args: dict, state: GameState, result: dict) -> None:
         """使用玉米加农炮: 先点击炮台，再点击落点."""

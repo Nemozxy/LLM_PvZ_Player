@@ -27,14 +27,13 @@ PVZ_ACTION_SCHEMA = {
                         "要执行的 PvZ 动作。可用动作：\n"
                         "* `place_plant`：种植植物。先选中卡片，再点击目标格子。\n"
                         "* `shovel`：铲除植物。先点击铲子按钮，再点击目标格子。\n"
-                        "* `collect_sun`：收集阳光。点击场上的阳光。\n"
                         "* `click_card`：选中一张卡片（暂不放置，用于后续操作）。\n"
                         "* `use_cob_cannon`：使用玉米加农炮。先点击炮台，再点击落点。\n"
                         "* `win_level`：直接通关当前关卡（跳过）。用于跳过 AI 难以胜任的实时小游戏。\n"
                         "* `select_seeds`：选卡界面选卡并开始游戏。传入植物类型列表，自动选卡+开始。卡槽总数见 <game_state>，选不满的槽位会被随机填充，应选满全部卡槽。"
                     ),
                     "enum": [
-                        "place_plant", "shovel", "collect_sun",
+                        "place_plant", "shovel",
                         "click_card", "use_cob_cannon", "win_level", "select_seeds",
                     ],
                 },
@@ -57,10 +56,6 @@ PVZ_ACTION_SCHEMA = {
                 "target_col": {
                     "type": "integer",
                     "description": "仅 use_cob_cannon 需要。落点列号 (0-based)。",
-                },
-                "index": {
-                    "type": "string",
-                    "description": "仅 collect_sun 需要。收集第几个阳光 (0-based 整数)，或 \"all\" 收集所有阳光。默认 \"all\"。",
                 },
                 "seeds": {
                     "type": "array",
@@ -235,7 +230,7 @@ def build_system_prompt(
 
 ⚠ **选卡界面用 select_seeds，不要用 computer_use 点卡片**：选卡界面（"选择你的植物"+"一起摇摆吧！"按钮）直接调 `select_seeds` 传入植物类型列表，程序自动选卡+开始游戏。不要用 computer_use 视觉点击卡片（坐标会偏）。
 
-注意：**阳光会由程序自动收集**，无需手动点击阳光或调用 collect_sun。
+注意：**阳光会由程序自动收集**，无需手动操作。
 
 如果 `pvz_action` 执行失败（如无卡片数据、特殊关卡布局），回退到 `computer_use` 用鼠标点击截图中的对应位置。
 
