@@ -64,9 +64,14 @@ class ConnectionManager:
         """推送一条操作流水记录."""
         await self.broadcast({"type": "action", "action": action, "detail": detail})
 
-    async def push_prompt(self, text: str) -> None:
-        """推送本轮 system + user prompt 到 WebUI（不含图片和历史上下文）."""
-        await self.broadcast({"type": "prompt", "text": text})
+    async def push_prompt(self, text: str, msg_type: str = "prompt") -> None:
+        """推送 prompt 到 WebUI（不含图片和历史上下文）.
+
+        Args:
+            text: prompt 文本内容。
+            msg_type: 消息子类型，"system_prompt" 或 "user_prompt"。
+        """
+        await self.broadcast({"type": "prompt", "subtype": msg_type, "text": text})
 
     # ------------------------------------------------------------------ #
     #  接收用户指令

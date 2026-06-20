@@ -104,20 +104,58 @@
       color: #66bb6a;
       cursor: pointer;
     }
-    .log-entry.prompt .prompt-header {
+    .log-entry.system_prompt {
+      color: #ffa726;
+      cursor: pointer;
+    }
+    .log-entry.user_prompt {
+      color: #42a5f5;
+      cursor: pointer;
+    }
+    .log-entry.prompt .prompt-header,
+    .log-entry.system_prompt .prompt-header,
+    .log-entry.user_prompt .prompt-header {
       display: flex;
       align-items: center;
       gap: 4px;
     }
-    .log-entry.prompt .prompt-arrow {
+    .log-entry.prompt .prompt-arrow,
+    .log-entry.system_prompt .prompt-arrow,
+    .log-entry.user_prompt .prompt-arrow {
       font-size: 10px;
       transition: transform 0.2s;
     }
-    .log-entry.prompt .prompt-arrow.open { transform: rotate(90deg); }
+    .log-entry.prompt .prompt-arrow.open,
+    .log-entry.system_prompt .prompt-arrow.open,
+    .log-entry.user_prompt .prompt-arrow.open {
+      transform: rotate(90deg);
+    }
     .log-entry.prompt .prompt-body {
       margin-top: 4px;
       padding: 6px 8px;
       background: #1e2a1e;
+      border-radius: 4px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .log-entry.system_prompt .prompt-body {
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: #2a2418;
+      border-radius: 4px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .log-entry.user_prompt .prompt-body {
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: #182028;
       border-radius: 4px;
       font-size: 12px;
       white-space: pre-wrap;
@@ -220,10 +258,24 @@
           :key="idx"
           class="log-entry"
           :class="log.level"
-          @click="log.level === 'prompt' && togglePrompt(idx)"
+          @click="['prompt','system_prompt','user_prompt'].includes(log.level) && togglePrompt(idx)"
         >
           <span class="log-time">{{ log.time }}</span>
-          <template v-if="log.level === 'prompt'">
+          <template v-if="log.level === 'system_prompt'">
+            <div class="prompt-header">
+              <span class="prompt-arrow" :class="{ open: log.expanded }">▶</span>
+              <span>🤖 系统提示词 (点击展开)</span>
+            </div>
+            <div v-if="log.expanded" class="prompt-body system-prompt-body">{{ log.text }}</div>
+          </template>
+          <template v-else-if="log.level === 'user_prompt'">
+            <div class="prompt-header">
+              <span class="prompt-arrow" :class="{ open: log.expanded }">▶</span>
+              <span>👤 用户提示词 (点击展开)</span>
+            </div>
+            <div v-if="log.expanded" class="prompt-body user-prompt-body">{{ log.text }}</div>
+          </template>
+          <template v-else-if="log.level === 'prompt'">
             <div class="prompt-header">
               <span class="prompt-arrow" :class="{ open: log.expanded }">▶</span>
               <span>📤 Prompt (点击展开)</span>
@@ -322,7 +374,7 @@
           } else if (msg.type === 'action') {
             this.addLog('动作', `${msg.action}: ${msg.detail}`, 'action');
           } else if (msg.type === 'prompt') {
-            this.addLog('', msg.text, 'prompt');
+            this.addLog('', msg.text, msg.subtype || 'prompt');
           } else if (msg.type === 'pong') {
             // 心跳回应
           }

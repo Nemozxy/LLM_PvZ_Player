@@ -332,7 +332,8 @@ class GameAgent:
                 else:
                     result = self._executor.execute(action, tc.arguments)
                 execution_results.append(result)
-                self._notify_webui("action", action, str(tc.arguments))
+                translated = self._translate_action(action, tc.arguments)
+                self._notify_webui("action", action, translated)
 
                 # 把执行结果反馈加入历史
                 if result.get("status") == "error":
@@ -571,20 +572,19 @@ class GameAgent:
         return self.webui.get_command()
 
     def _push_prompt_to_webui(self, messages: list[dict[str, Any]]) -> None:
-        """推送本轮 system + user prompt 到 WebUI（默认折叠）.
+        """推送 system prompt 和 user prompt 到 WebUI（两条独立消息）.
 
-        只显示系统提示词和本轮用户提示词，不包含历史上下文。
+        不包含历史上下文。
         """
         if self.webui is None or self.webui._loop is None:
             return
-        parts: list[str] = []
 
         # 取第一条 system 消息
         for msg in messages:
             if msg.get("role") == "system":
                 content = msg.get("content", "")
                 if isinstance(content, str) and content.strip():
-                    parts.append(f"[system] {content}")
+                    self._webui_push("system_prompt", content)
                 break
 
         # 取最后一条 user 消息
@@ -595,12 +595,84 @@ class GameAgent:
                     texts = [p.get("text", "") for p in content if p.get("type") == "text"]
                     content = "\n".join(texts)
                 if isinstance(content, str) and content.strip():
-                    parts.append(f"[user] {content}")
+                    self._webui_push("user_prompt", content)
                 break
 
-        if parts:
-            text = "\n\n---\n\n".join(parts)
-            asyncio.run_coroutine_threadsafe(self.webui.push_prompt(text), self.webui._loop)
+    def _webui_push(self, msg_type: str, text: str) -> None:
+        """向 WebUI 推送一条 prompt 类消息."""
+        if self.webui is None or self.webui._loop is None:
+            return
+        asyncio.run_coroutine_threadsafe(
+            self.webui.push_prompt(text, msg_type), self.webui._loop
+        )
+
+    @staticmethod
+    def _translate_action(action: str, args: dict[str, Any]) -> str:
+        """将 VLM 动作翻译成中文人话."""
+        # PvZ 专属动作
+        if action == "place_plant":
+            row = args.get("row", "?")
+            col = args.get("col", "?")
+            card_index = args.get("card_index", "?")
+            return f"种植植物 [卡片{card_index}] 到 行{row}列{col}"
+        if action == "shovel":
+            row = args.get("row", "?")
+            col = args.get("col", "?")
+            return f"铲除 行{row}列{col} 的植物"
+        if action == "collect_sun":
+            return "收集阳光"
+        if action == "use_cob_cannon":
+            row = args.get("row", "?")
+            col = args.get("col", "?")
+            return f"发射玉米炮 到 行{row}列{col}"
+        if action == "click_card":
+            card_index = args.get("card_index", "?")
+            return f"点击卡片 [{card_index}]"
+        if action == "win_level":
+            return "直接通关"
+        if action == "select_seeds":
+            seeds = args.get("seeds", [])
+            return f"选卡: {seeds}"
+
+        # 通用 GUI 动作
+        if action == "left_click":
+            coord = args.get("coordinate", [])
+            return f"左键点击 相对坐标({coord[0] if len(coord) > 0 else '?'}, {coord[1] if len(coord) > 1 else '?'})"
+        if action == "right_click":
+            coord = args.get("coordinate", [])
+            return f"右键点击 相对坐标({coord[0] if len(coord) > 0 else '?'}, {coord[1] if len(coord) > 1 else '?'})"
+        if action == "double_click":
+            coord = args.get("coordinate", [])
+            return f"双击 相对坐标({coord[0] if len(coord) > 0 else '?'}, {coord[1] if len(coord) > 1 else '?'})"
+        if action == "drag":
+            start = args.get("start_coordinate", [])
+            end = args.get("end_coordinate", [])
+            return f"拖拽 从({start[0] if len(start) > 0 else '?'},{start[1] if len(start) > 1 else '?'}) 到({end[0] if len(end) > 0 else '?'},{end[1] if len(end) > 1 else '?'})"
+        if action == "scroll":
+            direction = args.get("direction", "?")
+            amount = args.get("amount", "?")
+            coord = args.get("coordinate", [])
+            cx = coord[0] if len(coord) > 0 else "?"
+            cy = coord[1] if len(coord) > 1 else "?"
+            return f"滚动 {direction} {amount}次 位置({cx},{cy})"
+        if action == "key_press":
+            key = args.get("key", "?")
+            return f"按键 {key}"
+        if action == "type_text":
+            text = args.get("text", "")
+            return f"输入文字: {text}"
+        if action == "wait":
+            t = args.get("time", "?")
+            return f"等待 {t} 秒"
+        if action == "terminate":
+            status = args.get("status", "success")
+            return f"任务结束 ({status})"
+        if action == "answer":
+            text = args.get("text", "")
+            return f"回答: {text}"
+
+        # 未知动作，原样显示
+        return f"{action} {args}"
 
     # ------------------------------------------------------------------ #
     #  辅助
