@@ -122,9 +122,17 @@ class ZombieInfo:
 
     @property
     def col_estimate(self) -> float:
-        """将横坐标估算为列号 (0~8)，保留一位小数。"""
-        # PvZ 格子: 每格约 80 像素宽
-        # 左边界约 x=40, 从左到右 col 0→8
+        """将横坐标估算为列号 (0~8)，保留一位小数。
+
+        经验证 (verify_grid_formula.py):
+        - grid_to_pixel 返回: col 0→x=80, col 1→x=160, ..., col 8→x=720
+        - 即 x = (col+1) * 80, 反推 col = x/80 - 1
+        - 僵尸 abscissa 是锚点 (通常脚部中心)，不是 sprite 视觉中心
+        - 僵尸 sprite 较宽，视觉上看可能延伸到下一列
+
+        公式: col = (abscissa - 40) / 80
+        例: abscissa=661.6 → col=7.8 (在 col 7 偏右，距 col 7 中心仅 21.6px)
+        """
         if self.abscissa <= 0:
             return 0.0
         return min(8.0, max(0.0, round((self.abscissa - 40) / 80, 1)))
