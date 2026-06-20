@@ -325,7 +325,8 @@ class GameAgent:
                     continue
 
                 # 判断是否为 PvZ 专属动作，分派到对应执行器
-                if tc.name == "pvz_action" and self._pvz_executor and self._pvz_reader:
+                is_pvz_action = tc.name == "pvz_action" and self._pvz_executor and self._pvz_reader
+                if is_pvz_action:
                     result = self._execute_pvz_action(action, tc.arguments)
                 else:
                     result = self._executor.execute(action, tc.arguments)
@@ -343,6 +344,10 @@ class GameAgent:
                     feedback = f"[执行结果] action={action}, status={result.get('status')}, detail={result}"
                 self._push_history_user_text(feedback)
                 logger.debug("[Agent] {}", feedback)
+
+                if is_pvz_action and result.get("status") == "error":
+                    logger.warning("[Agent] PvZ 动作失败，停止执行本轮后续动作")
+                    break
 
                 # 连续动作之间留小间隔，让游戏响应
                 time.sleep(0.15)
