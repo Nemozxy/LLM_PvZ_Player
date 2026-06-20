@@ -403,6 +403,31 @@ class PvZMemory:
             [PVZ_BASE_ADDRESS, self.offsets.game_mode], read_type="int"
         )
 
+    def get_card_slot_count(self, default: int = 10) -> int:
+        """读取当前卡槽数量（选卡/战斗界面通用）.
+
+        从 MainObject→SeedArray→[seed_count] 读取已分配的卡片槽位数。
+        读不到或异常时返回 default（生存模式固定 10 槽）。
+
+        选卡界面 MainObject 已存在但 SeedArray 可能尚未填充，此时
+        返回默认值，由调用方降级提示。
+        """
+        try:
+            count = self.read_chain_safe(
+                [
+                    PVZ_BASE_ADDRESS,
+                    self.offsets.main_object,
+                    self.offsets.seed_array,
+                    self.offsets.seed_count,
+                ],
+                read_type="int",
+            )
+            if 1 <= count <= 10:
+                return count
+            return default
+        except Exception:
+            return default
+
     def get_sun(self) -> int:
         """读取当前阳光数量."""
         return self.read_chain_safe(
