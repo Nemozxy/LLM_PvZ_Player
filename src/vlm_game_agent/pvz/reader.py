@@ -640,7 +640,16 @@ class PvZStateReader:
             label = ui_names.get(state.game_ui, "未知")
             # 教学关等特殊场景 game_ui=2 但实际在战斗，此时 in_battle=True，
             # 不会走到这里；真正非战斗时才显示 UI 标签。
-            return f"游戏状态: {label} (非战斗)"
+            lines = [f"游戏状态: {label} (非战斗)"]
+            # 选卡界面：告诉 AI 卡槽总数，避免少选导致随机补满不想要的卡。
+            # pick_random_seeds 只填满 AI 没选的空槽，所以少选 = 被动接受随机卡。
+            if state.game_ui == GameUI.SELECT_CARD:
+                slot_count = self._mem.get_card_slot_count()
+                lines.append(
+                    f"🎴 卡槽: {slot_count} 个。用 select_seeds 选卡，"
+                    f"选不满的槽位会被随机填充，建议选满 {slot_count} 张。"
+                )
+            return "\n".join(lines)
 
         lines: list[str] = []
 
@@ -666,16 +675,22 @@ class PvZStateReader:
         lines.append("")
 
         # ---- 种子卡片 ----
+        # 状态判定优先级: 冷却中 > 就绪 > 阳光不足 > 锁定/禁用
+        # 关键: 只要 cd>0 就显示冷却剩余秒数，不因 is_usable 不可靠而吞掉冷却信息。
+        # （内存偏移 0x48 的 is_usable 语义模糊，可能把冷却中的卡也标成不可用。）
         lines.append("📋 卡片:")
         if state.seeds:
             for s in state.seeds:
-                if s.is_ready:
+                if s.cd > 0:
+                    # 冷却中: 显示剩余秒数 (cd 是厘秒)
+                    status = f"⏳{s.cd / 100:.1f}s"
+                elif state.sun >= s.sun_cost:
                     status = "✅"
-                elif not s.is_usable:
-                    status = "❌"
+                elif s.sun_cost > 0:
+                    status = "☀不足"
                 else:
-                    progress = int(s.cd_progress * 100)
-                    status = f"⏳{progress}%"
+                    # cd==0、免费、仍不可用 → 多半是被禁用/锁定
+                    status = "🔒"
                 lines.append(
                     f"  [{s.index}] {s.name} ({s.sun_cost}☀) {status}"
                 )
