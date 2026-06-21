@@ -224,6 +224,13 @@ class PvZExecutor:
                     f"升级植物 {seed.name} 必须种在 {base_name} 上，"
                     f"行{row}列{col} 是 {target_plant.name}，不是 {base_name}"
                 )
+        else:
+            # 普通植物：目标格子必须空闲，不能叠种
+            for p in state.plants:
+                if p.row == row and p.col == col:
+                    raise ValueError(
+                        f"行{row}列{col} 已有 {p.name}，不能叠种 {seed.name}"
+                    )
 
         if self._injector:
             # 注入模式: MouseClick 点卡片 + 点格子
