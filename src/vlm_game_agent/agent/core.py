@@ -608,6 +608,16 @@ class GameAgent:
         elapsed = now - self._last_turn_time
         time_hint = f"[当前截图，距上一轮 {elapsed:.1f} 秒]"
 
+        # 注入上下文长度信息，帮助模型感知剩余空间
+        context_hint = ""
+        if hasattr(self.vlm, 'last_prompt_tokens') and self.vlm.last_prompt_tokens > 0:
+            used = self.vlm.last_prompt_tokens
+            # 优先从 compressor 获取总上下文大小，否则从 settings 配置推断
+            total = self._compressor.max_tokens if self._compressor else 0
+            if total > 0:
+                pct = used / total * 100
+                context_hint = f"[上下文: {used}/{total} token ({pct:.0f}%)]"
+
         # 注入上一轮操作摘要，让模型有持续性记忆
         last_turn_summary = self._build_last_turn_summary(execution_results=self._last_execution_results)
 
@@ -616,6 +626,8 @@ class GameAgent:
 
         # 构建用户消息
         user_text_parts = [time_hint]
+        if context_hint:
+            user_text_parts.append(context_hint)
         if game_state_text:
             user_text_parts.append(f"\n<game_state>\n{game_state_text}\n</game_state>")
         user_text_parts.append(f"\n{last_turn_summary}")
