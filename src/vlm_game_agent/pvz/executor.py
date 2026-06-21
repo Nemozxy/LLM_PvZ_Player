@@ -394,17 +394,27 @@ class PvZExecutor:
             raise RuntimeError("选卡需要代码注入器，当前未启用")
 
         # 等待选卡 UI 完全渲染。
-        # 关卡结束→选卡界面过渡期间，game_ui 已变为 SELECT_CARD 但 SelectCardUi_p
-        # 仍为 0，此时执行选卡会导致下一波 UI 异常（卡片栏/阳光/铲子不显示）。
-        # 必须等 SelectCardUi_p 非零，表示 UI 对象已创建，选卡操作才安全。
+        # 关卡结束→选卡界面过渡期间，game_ui 已变为 SELECT_CARD 但 UI 尚未就绪，
+        # 此时执行选卡会导致下一波 UI 异常（卡片栏/阳光/铲子不显示）。
+        # 判定条件（全部满足才视为就绪）：
+        #   1. SelectCardUi_p 非零 — UI 对象已创建
+        #   2. 卡槽数量可读且合理 — SeedArray 已初始化
+        #   3. 额外等待 0.5s — 确保 UI 动画/过渡完成
         mem = self._injector._mem
-        for _ in range(50):  # 最多等 5 秒
+        for _ in range(100):  # 最多等 10 秒
             ptr = mem.get_select_card_ui_ptr()
-            if ptr:
+            slot_count = mem.get_card_slot_count(default=0)
+            if ptr and 1 <= slot_count <= 10:
                 break
             time.sleep(0.1)
         else:
-            raise RuntimeError("等待选卡 UI 就绪超时 (5s)，SelectCardUi_p 始终为 0")
+            raise RuntimeError(
+                "等待选卡 UI 就绪超时 (10s)，"
+                f"SelectCardUi_ptr={ptr}, 卡槽数={slot_count}"
+            )
+
+        # UI 对象和卡槽数据已就绪，再等一小段确保过渡动画完成
+        time.sleep(0.5)
 
         # 逐张选卡。任何一张失败都应中止，避免带着残缺/错误的卡组继续
         # pick_random_seeds → rock，那样会用错误的植物开局却误以为成功了。
