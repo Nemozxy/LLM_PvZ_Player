@@ -675,6 +675,22 @@ class PvZStateReader:
                     f"🎴 卡槽: {slot_count} 个。用 select_seeds 选卡，"
                     f"选不满的槽位会被随机填充，建议选满 {slot_count} 张。"
                 )
+                # 场景信息
+                if state.scene_name and state.scene_name != "未知":
+                    lines.append(f"🗺 场景: {state.scene_name}")
+                # 本关将出现的僵尸类型（去重）
+                if state.zombies:
+                    seen: set[int] = set()
+                    zombie_types: list[str] = []
+                    for z in state.zombies:
+                        if z.zombie_type not in seen:
+                            seen.add(z.zombie_type)
+                            zombie_types.append(z.name)
+                    if zombie_types:
+                        lines.append(f"🧟 本关僵尸: {', '.join(zombie_types)}")
+                # 波次信息
+                if state.total_wave > 0:
+                    lines.append(f"🌊 总波次: {state.total_wave}")
                 # 扫描图鉴目录，列出可用图鉴
                 guide_list = self._scan_guide_dir()
                 if guide_list:
