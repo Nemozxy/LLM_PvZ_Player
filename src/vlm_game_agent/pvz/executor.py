@@ -393,6 +393,19 @@ class PvZExecutor:
         if not self._injector:
             raise RuntimeError("选卡需要代码注入器，当前未启用")
 
+        # 等待选卡 UI 完全渲染。
+        # 关卡结束→选卡界面过渡期间，game_ui 已变为 SELECT_CARD 但 SelectCardUi_p
+        # 仍为 0，此时执行选卡会导致下一波 UI 异常（卡片栏/阳光/铲子不显示）。
+        # 必须等 SelectCardUi_p 非零，表示 UI 对象已创建，选卡操作才安全。
+        mem = self._injector._mem
+        for _ in range(50):  # 最多等 5 秒
+            ptr = mem.get_select_card_ui_ptr()
+            if ptr:
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("等待选卡 UI 就绪超时 (5s)，SelectCardUi_p 始终为 0")
+
         # 逐张选卡。任何一张失败都应中止，避免带着残缺/错误的卡组继续
         # pick_random_seeds → rock，那样会用错误的植物开局却误以为成功了。
         chosen: list[int] = []

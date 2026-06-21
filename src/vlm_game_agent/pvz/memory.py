@@ -28,6 +28,9 @@ from .offsets import (
     PvZOffsets,
 )
 
+# 选卡界面 UI 对象指针偏移，定义在 injector.py 中，此处直接用常量避免循环导入
+_SELECT_CARD_UI_OFFSET = 0x774
+
 # ================================================================== #
 #  Windows API 声明
 # ================================================================== #
@@ -427,6 +430,21 @@ class PvZMemory:
             return default
         except Exception:
             return default
+
+    def get_select_card_ui_ptr(self) -> int:
+        """读取选卡界面 UI 对象指针 (SelectCardUi_p).
+
+        PvzBase + 0x774 指向选卡界面的 UI 对象。
+        选卡界面完全渲染后此指针非零；过渡期间为 0。
+        用于判断选卡 UI 是否已就绪，避免在 UI 未渲染时执行选卡操作。
+        """
+        try:
+            return self.read_chain_safe(
+                [PVZ_BASE_ADDRESS, _SELECT_CARD_UI_OFFSET],
+                read_type="int",
+            )
+        except Exception:
+            return 0
 
     def get_sun(self) -> int:
         """读取当前阳光数量."""
