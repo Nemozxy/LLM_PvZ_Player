@@ -179,6 +179,7 @@ def main() -> None:
         include_images_in_history=settings.agent_include_images_in_history,
         include_image=settings.agent_include_image,
         include_reasoning_in_history=settings.agent_include_reasoning_in_history,
+        guide_dir=settings.guide_dir,
     )
 
     # 7. 任务目标：配置优先，否则交互输入

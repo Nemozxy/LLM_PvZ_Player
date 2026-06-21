@@ -30,11 +30,13 @@ PVZ_ACTION_SCHEMA = {
                         "* `click_card`：选中一张卡片（暂不放置，用于后续操作）。\n"
                         "* `use_cob_cannon`：使用玉米加农炮。先点击炮台，再点击落点。\n"
                         "* `win_level`：直接通关当前关卡（跳过）。用于跳过 AI 难以胜任的实时小游戏。\n"
-                        "* `select_seeds`：选卡界面选卡并开始游戏。传入植物类型列表，自动选卡+开始。卡槽总数见 <game_state>，选不满的槽位会被随机填充，应选满全部卡槽。"
+                        "* `select_seeds`：选卡界面选卡并开始游戏。传入植物类型列表，自动选卡+开始。卡槽总数见 <game_state>，选不满的槽位会被随机填充，应选满全部卡槽。\n"
+                        "* `view_guide`：查看植物或僵尸的图鉴资料。传入名称列表，系统返回详细属性和策略建议。不确定某个植物/僵尸的特性时，先查图鉴再决策。"
                     ),
                     "enum": [
                         "place_plant", "shovel",
                         "click_card", "use_cob_cannon", "win_level", "select_seeds",
+                        "view_guide",
                     ],
                 },
                 "card_index": {
@@ -61,6 +63,11 @@ PVZ_ACTION_SCHEMA = {
                     "type": "array",
                     "items": {"type": "integer"},
                     "description": "仅 select_seeds 需要。植物类型列表，如 [0,1,3,5]。类型对照见下方植物类型表。",
+                },
+                "names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "仅 view_guide 需要。要查看的植物或僵尸名称列表，如 [\"向日葵\", \"铁桶\"]。名称与 <game_state> 中显示的名称一致。",
                 },
             },
         },
@@ -225,6 +232,7 @@ def build_system_prompt(
 - 选中卡片 → `pvz_action` (click_card)
 - 跳过实时小游戏 → `pvz_action` (win_level)
 - 选卡界面选卡开始 → `pvz_action` (select_seeds)
+- 查看植物/僵尸图鉴 → `pvz_action` (view_guide)
 
 ⚠ **实时小游戏直接跳过**：坚果保龄球、传送带关卡等对实时性要求极高，AI 的反应速度跟不上，强行玩必然失败。识别到这类关卡（传送带上有移动的卡片、保龄球玩法等）时，直接调用 `win_level` 跳过，不要浪费时间尝试。
 
@@ -284,6 +292,11 @@ def build_system_prompt(
 选卡界面选卡并开始游戏（按 <game_state> 里的卡槽总数选满，下面是 10 槽示例）：
 <tool_call>
 {{"name": "pvz_action", "arguments": {{"action": "select_seeds", "seeds": [1, 0, 3, 5, 2, 4, 7, 20, 6, 11]}}}}
+</tool_call>
+
+查看向日葵和铁桶僵尸的图鉴资料：
+<tool_call>
+{{"name": "pvz_action", "arguments": {{"action": "view_guide", "names": ["向日葵", "铁桶"]}}}}
 </tool_call>
 
 一回合内多种植物 + 等待：

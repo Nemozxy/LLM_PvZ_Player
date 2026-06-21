@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -235,8 +236,9 @@ class PvZStateReader:
         4: "天台", 5: "月夜",
     }
 
-    def __init__(self, memory: PvZMemory) -> None:
+    def __init__(self, memory: PvZMemory, guide_dir: str | Path | None = None) -> None:
         self._mem = memory
+        self._guide_dir = Path(guide_dir) if guide_dir else None
 
     def read_state(self) -> GameState:
         """读取完整游戏状态."""
@@ -657,6 +659,11 @@ class PvZStateReader:
                     f"🎴 卡槽: {slot_count} 个。用 select_seeds 选卡，"
                     f"选不满的槽位会被随机填充，建议选满 {slot_count} 张。"
                 )
+                # 扫描图鉴目录，列出可用图鉴
+                guide_list = self._scan_guide_dir()
+                if guide_list:
+                    lines.append(f"📖 可用图鉴: {', '.join(guide_list)}")
+                    lines.append("  (不确定植物/僵尸特性时，可用 view_guide 查看图鉴)")
             return "\n".join(lines)
 
         lines: list[str] = []
@@ -826,3 +833,16 @@ class PvZStateReader:
         """一步完成: 读取状态 + 格式化文本."""
         state = self.read_state()
         return self.format_state(state)
+
+    def _scan_guide_dir(self) -> list[str]:
+        """扫描图鉴目录，返回所有 .md 文件的相对路径列表（去掉 .md 后缀）.
+
+        支持多级目录，路径用 / 分隔，如 "植物/向日葵"、"僵尸/铁桶"。
+        """
+        if not self._guide_dir or not self._guide_dir.is_dir():
+            return []
+        results: list[str] = []
+        for f in sorted(self._guide_dir.rglob("*.md")):
+            rel = f.relative_to(self._guide_dir).with_suffix("")
+            results.append(str(rel).replace("\\", "/"))
+        return results

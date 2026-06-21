@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -53,6 +54,7 @@ class GameAgent:
         include_images_in_history: bool = False,
         include_image: bool = True,
         include_reasoning_in_history: bool = True,
+        guide_dir: str | Path | None = None,
     ) -> None:
         """初始化 Agent.
 
@@ -77,6 +79,7 @@ class GameAgent:
             include_images_in_history: 是否将历史截图保留在上下文中（默认关）。
             include_image: 是否传图片给模型（默认开）。False 则纯文本模式，适用于纯 LLM。
             include_reasoning_in_history: 是否将思维链加入历史上下文（默认开）。
+            guide_dir: 图鉴文件目录路径（可选），用于 view_guide 动作。
         """
         self.capture = capture
         self.pause = pause
@@ -90,6 +93,7 @@ class GameAgent:
         self.include_images_in_history = include_images_in_history
         self.include_image = include_image
         self.include_reasoning_in_history = include_reasoning_in_history
+        self._guide_dir = Path(guide_dir) if guide_dir else None
 
         # 动作感知延迟映射表
         self._action_delays: dict[str, float] = {
@@ -117,7 +121,7 @@ class GameAgent:
         self._pvz_memory = pvz_memory
         self._pvz_reader: PvZStateReader | None = None
         if self._pvz_memory and self._pvz_memory.is_connected():
-            self._pvz_reader = PvZStateReader(self._pvz_memory)
+            self._pvz_reader = PvZStateReader(self._pvz_memory, self._guide_dir)
             logger.info("[Agent] PvZ 内存读取已启用: {}", self._pvz_memory.version_name)
 
         self._executor: ActionExecutor | None = None
@@ -312,6 +316,9 @@ class GameAgent:
 
             # 8. 执行动作
             execution_results: list[dict[str, Any]] = []
+            guide_contents: list[str] = []  # 收集图鉴查询结果
+            has_game_action = False  # 是否有实际游戏动作（非 view_guide）
+
             for tc in tool_calls:
                 action = tc.arguments.get("action", "")
                 if action == "terminate":
@@ -326,6 +333,20 @@ class GameAgent:
                     logger.info("[Agent] 回答: {}", text)
                     self._notify_webui("log", f"Agent 回答: {text}", "info")
                     continue
+
+                # view_guide: 读取图鉴文件，不执行游戏操作
+                if action == "view_guide":
+                    names = tc.arguments.get("names", [])
+                    content = self._read_guide(names)
+                    if content:
+                        guide_contents.append(content)
+                        self._notify_webui("action", action, f"查看图鉴: {', '.join(names)}", status="ok", result_text=f"已返回 {len(names)} 条图鉴")
+                    else:
+                        self._notify_webui("action", action, f"查看图鉴: {', '.join(names)}", status="error", result_text="未找到匹配的图鉴文件")
+                    execution_results.append({"action": "view_guide", "status": "ok", "names": names, "chars": len(content)})
+                    continue
+
+                has_game_action = True
 
                 # 判断是否为 PvZ 专属动作，分派到对应执行器
                 is_pvz_action = tc.name == "pvz_action" and self._pvz_executor and self._pvz_reader
@@ -361,6 +382,65 @@ class GameAgent:
 
                 # 连续动作之间留小间隔，让游戏响应
                 time.sleep(0.15)
+
+            # 8.5 图鉴查询结果处理
+            if guide_contents:
+                guide_text = "\n\n---\n\n".join(guide_contents)
+                feedback = f"[图鉴查询结果]\n{guide_text}\n\n请根据以上图鉴信息做出决策。"
+                self._push_history_user_text(feedback)
+                logger.info("[Agent] 已注入图鉴内容 ({} 字符)", len(guide_text))
+
+                # 如果本轮只有 view_guide 没有游戏动作，做一次追加 VLM 调用
+                if not has_game_action:
+                    logger.info("[Agent] 本轮仅有图鉴查询，追加 VLM 调用")
+                    self._notify_webui("log", "基于图鉴信息追加决策...", "info")
+                    try:
+                        follow_up_output, follow_up_reasoning = self.vlm.chat(self._history)
+                        if follow_up_reasoning:
+                            logger.debug("[Agent] 追加 VLM 思维链:\n{}", follow_up_reasoning)
+                            self._notify_webui("log", f"[思考] {follow_up_reasoning}", "debug")
+                        logger.info("[Agent] 追加 VLM 输出:\n{}", follow_up_output)
+                        self._notify_webui("log", f"VLM: {follow_up_output[:200]}", "info")
+
+                        # 将追加输出加入历史
+                        if self.include_reasoning_in_history and follow_up_reasoning:
+                            self._push_history_assistant(f"{follow_up_output}\n\n[思维链]\n{follow_up_reasoning}")
+                        else:
+                            self._push_history_assistant(follow_up_output)
+
+                        # 解析并执行追加输出的动作
+                        follow_up_calls = parse_tool_calls(follow_up_output)
+                        for tc in follow_up_calls:
+                            action = tc.arguments.get("action", "")
+                            if action == "terminate":
+                                self._running = False
+                                break
+                            if action in ("answer", "view_guide"):
+                                continue  # 追加调用中忽略 answer/view_guide
+
+                            is_pvz_action = tc.name == "pvz_action" and self._pvz_executor and self._pvz_reader
+                            if is_pvz_action:
+                                result = self._execute_pvz_action(action, tc.arguments)
+                            else:
+                                result = self._executor.execute(action, tc.arguments)
+                            execution_results.append(result)
+                            translated = self._translate_action(action, tc.arguments)
+                            action_status = result.get("status", "ok")
+                            action_result_text = result.get("error") or result.get("detail", "")
+                            self._notify_webui("action", action, translated, status=action_status, result_text=action_result_text)
+
+                            if result.get("status") == "error":
+                                fb = f"[执行失败] action={action}, error={result.get('error', '未知错误')}。请重新观察并重试。"
+                            else:
+                                fb = f"[执行结果] action={action}, status={result.get('status')}, detail={result}"
+                            self._push_history_user_text(fb)
+
+                            if is_pvz_action and result.get("status") == "error":
+                                break
+                            time.sleep(0.15)
+                    except Exception as exc:
+                        logger.error("[Agent] 追加 VLM 调用失败: {}", exc)
+                        self._notify_webui("log", f"追加 VLM 失败: {exc}", "error")
 
             # 9. 等待画面变化（动作感知延迟 + 基础延迟 + 模型主动 wait，三者取最大值）
             wait_time = self._compute_wait_time(tool_calls)
@@ -663,6 +743,9 @@ class GameAgent:
         if action == "select_seeds":
             seeds = args.get("seeds", [])
             return f"选卡: {seeds}"
+        if action == "view_guide":
+            names = args.get("names", [])
+            return f"查看图鉴: {', '.join(names)}"
 
         # 通用 GUI 动作
         if action == "left_click":
@@ -765,7 +848,7 @@ class GameAgent:
             if self._pvz_memory and not self._pvz_memory.is_connected():
                 try:
                     if self._pvz_memory.connect():
-                        self._pvz_reader = PvZStateReader(self._pvz_memory)
+                        self._pvz_reader = PvZStateReader(self._pvz_memory, self._guide_dir)
                         logger.info("[Agent] PvZ 内存读取已连接: {}", self._pvz_memory.version_name)
                 except Exception as exc:
                     logger.debug("[Agent] PvZ 内存连接失败: {}", exc)
@@ -805,6 +888,46 @@ class GameAgent:
             else:
                 parts.append(f"  {action}: {status}")
         return "\n".join(parts)
+
+    def _read_guide(self, names: list[str]) -> str:
+        """读取图鉴文件内容.
+
+        Args:
+            names: 要查看的植物/僵尸名称列表，支持多级路径如 "植物/向日葵"。
+
+        Returns:
+            拼接后的图鉴文本，未找到的名称会标注提示。
+        """
+        if not self._guide_dir or not self._guide_dir.is_dir():
+            return "[图鉴] 图鉴目录未配置或不存在"
+
+        parts: list[str] = []
+        not_found: list[str] = []
+        for name in names:
+            # 支持多级路径，如 "植物/向日葵" 或 "向日葵"
+            guide_file = self._guide_dir / f"{name}.md"
+            if not guide_file.is_file():
+                # 尝试在子目录中查找同名文件
+                candidates = list(self._guide_dir.rglob(f"{name}.md"))
+                if candidates:
+                    guide_file = candidates[0]
+                else:
+                    not_found.append(name)
+                    continue
+            try:
+                content = guide_file.read_text(encoding="utf-8").strip()
+                if content:
+                    parts.append(content)
+                else:
+                    not_found.append(name)
+            except Exception as exc:
+                not_found.append(name)
+                logger.warning("[Agent] 读取图鉴 {} 失败: {}", name, exc)
+
+        if not_found:
+            parts.append(f"[未找到图鉴: {', '.join(not_found)}]")
+
+        return "\n\n---\n\n".join(parts)
 
     def _execute_pvz_action(self, action: str, args: dict[str, Any]) -> dict[str, Any]:
         """执行 PvZ 专属动作，需要先读取最新游戏状态.

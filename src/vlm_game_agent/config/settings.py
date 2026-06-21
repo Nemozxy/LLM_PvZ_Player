@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # ========== 记忆系统 ==========
     memory_dir: str = "./memories"
 
+    # ========== 图鉴系统 ==========
+    guide_dir: str = "./guide"  # 图鉴文件目录，view_guide 动作从此读取
+
     # ========== 操作日志 ==========
     action_log_enabled: bool = True
     action_log_dir: str = "./action_logs"
