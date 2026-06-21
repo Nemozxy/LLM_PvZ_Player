@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # ========== Agent 行为 ==========
     agent_max_history_turns: str = "full"  # "full" 保留全部历史，或整数保留最近 N 轮
     agent_include_images_in_history: bool = False  # 是否将历史截图保留在上下文中（默认关，仅最新截图生效）
+    agent_include_image: bool = True  # 是否传图片给模型（False 则纯文本模式，适用于纯 LLM）
     agent_include_reasoning_in_history: bool = True  # 是否将思维链(reasoning)加入历史上下文（默认开）
     agent_pause_before_think: bool = True
     agent_action_delay: float = 1.0

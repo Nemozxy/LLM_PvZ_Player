@@ -177,6 +177,7 @@ def main() -> None:
         stop_hotkey=stop_hotkey,
         pvz_memory=pvz_memory,
         include_images_in_history=settings.agent_include_images_in_history,
+        include_image=settings.agent_include_image,
         include_reasoning_in_history=settings.agent_include_reasoning_in_history,
     )
 

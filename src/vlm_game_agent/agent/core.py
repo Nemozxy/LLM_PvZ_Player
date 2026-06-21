@@ -51,6 +51,7 @@ class GameAgent:
         action_logger: ActionLogger | None = None,
         pvz_memory: PvZMemory | None = None,
         include_images_in_history: bool = False,
+        include_image: bool = True,
         include_reasoning_in_history: bool = True,
     ) -> None:
         """初始化 Agent.
@@ -74,6 +75,7 @@ class GameAgent:
             action_logger: 操作日志记录器（可选），保存截图与动作日志。
             pvz_memory: PvZ 内存读取器（可选），注入结构化游戏状态到 prompt。
             include_images_in_history: 是否将历史截图保留在上下文中（默认关）。
+            include_image: 是否传图片给模型（默认开）。False 则纯文本模式，适用于纯 LLM。
             include_reasoning_in_history: 是否将思维链加入历史上下文（默认开）。
         """
         self.capture = capture
@@ -86,6 +88,7 @@ class GameAgent:
         self.stop_hotkey = stop_hotkey
         self.action_delay = action_delay
         self.include_images_in_history = include_images_in_history
+        self.include_image = include_image
         self.include_reasoning_in_history = include_reasoning_in_history
 
         # 动作感知延迟映射表
@@ -536,19 +539,28 @@ class GameAgent:
         if game_state_text:
             user_text_parts.append(f"\n<game_state>\n{game_state_text}\n</game_state>")
         user_text_parts.append(f"\n{last_turn_summary}")
-        user_text_parts.append("\n请根据当前截图和游戏状态，输出下一步操作。")
+        if self.include_image:
+            user_text_parts.append("\n请根据当前截图和游戏状态，输出下一步操作。")
+        else:
+            user_text_parts.append("\n请根据当前游戏状态，输出下一步操作。")
         user_text = "\n".join(user_text_parts)
 
-        messages.append({
-            "role": "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{img_b64}"},
-                },
-                {"type": "text", "text": user_text},
-            ],
-        })
+        if self.include_image:
+            messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{img_b64}"},
+                    },
+                    {"type": "text", "text": user_text},
+                ],
+            })
+        else:
+            messages.append({
+                "role": "user",
+                "content": user_text,
+            })
         return messages
 
     # ------------------------------------------------------------------ #
