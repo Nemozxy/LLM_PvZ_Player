@@ -20,6 +20,7 @@ from loguru import logger
 
 from .injector import PvZCodeInjector
 from .memory import PvZMemory
+from .offsets import PLANT_NAMES, PLANT_UPGRADE_MAP
 from .reader import GameState, SeedInfo
 
 # Windows API (鼠标 fallback 用)
@@ -203,6 +204,26 @@ class PvZExecutor:
             raise ValueError(f"卡片 [{card_index}] {seed.name} 未就绪 (冷却中或不可用)")
         if state.sun < seed.sun_cost:
             raise ValueError(f"卡片 [{card_index}] {seed.name} 需要 {seed.sun_cost} 阳光，当前只有 {state.sun}")
+
+        # 升级植物检查：必须点在已有基础植物上
+        base_type = PLANT_UPGRADE_MAP.get(seed.plant_type)
+        if base_type is not None:
+            base_name = PLANT_NAMES.get(base_type, f"类型{base_type}")
+            target_plant = None
+            for p in state.plants:
+                if p.row == row and p.col == col:
+                    target_plant = p
+                    break
+            if target_plant is None:
+                raise ValueError(
+                    f"升级植物 {seed.name} 必须种在已有 {base_name} 上，"
+                    f"行{row}列{col} 为空地"
+                )
+            if target_plant.plant_type != base_type:
+                raise ValueError(
+                    f"升级植物 {seed.name} 必须种在 {base_name} 上，"
+                    f"行{row}列{col} 是 {target_plant.name}，不是 {base_name}"
+                )
 
         if self._injector:
             # 注入模式: MouseClick 点卡片 + 点格子

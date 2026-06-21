@@ -974,6 +974,9 @@ class GameAgent:
             self._verify_pvz_place_plant(args, result, expected_plant_type, expected_plant_name)
         return result
 
+    # 灰烬类植物：种下后立即爆炸消失，无法通过内存验证
+    _ASH_PLANT_TYPES = frozenset({2, 4, 20, 35})  # 樱桃炸弹, 土豆地雷, 火爆辣椒, 毁灭菇
+
     def _verify_pvz_place_plant(
         self,
         args: dict[str, Any],
@@ -987,6 +990,12 @@ class GameAgent:
         row = args.get("row")
         col = args.get("col")
         if row is None or col is None:
+            return
+
+        # 灰烬类植物种下后立即爆炸消失，跳过验证，直接标记成功
+        if expected_plant_type is not None and expected_plant_type in self._ASH_PLANT_TYPES:
+            result["verified"] = True
+            result["detail"] = f"已种植 {expected_plant_name} 到 行{row}列{col} (灰烬植物，跳过验证)"
             return
 
         time.sleep(0.3)

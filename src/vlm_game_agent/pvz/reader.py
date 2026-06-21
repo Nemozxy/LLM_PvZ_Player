@@ -203,10 +203,15 @@ class GameState:
     # 是否在战斗中
     @property
     def in_battle(self) -> bool:
-        # game_ui==IN_GAME(3): 正常战斗，一定在战斗中
-        # game_ui!=IN_GAME 但 plants>0: 教学关等特殊场景（game_ui 仍是 2 但实际在战斗，
+        # game_ui==SELECT_CARD(2): 选卡界面，一定不在战斗中。
+        #   生存模式过完一大波后进入新一轮选卡，场上残留上一轮的 plants，
+        #   但 game_ui 已回到 2，此时应走选卡分支而非战斗分支。
+        # game_ui==IN_GAME(3): 正常战斗，一定在战斗中。
+        # game_ui!=2/3 但 plants>0: 教学关等特殊场景（game_ui 仍是其他值但实际在战斗，
         #   场上有要铲的教学植物）。用 plants 而非 zombies 判定，因为选卡界面会预加载
         #   僵尸到屏幕外等待（zombies>0 但 plants=0），不能误判为战斗中。
+        if self.game_ui == GameUI.SELECT_CARD:
+            return False
         if self.game_ui == GameUI.IN_GAME:
             return True
         return bool(self.plants)
@@ -645,6 +650,17 @@ class PvZStateReader:
         - 行内标记关键状态 (冷却/血量/异常)
         - 僵尸按行分组, 便于战略决策
         """
+        # 生存模式过完一大波后进入新一轮选卡，game_ui 可能仍为 IN_GAME(3)，
+        # 但 seed_array 尚未初始化（所有卡片 plant_type<0），此时应视为选卡界面。
+        all_cards_invalid = (
+            state.in_battle
+            and state.seeds
+            and all(s.plant_type < 0 for s in state.seeds)
+        )
+        if all_cards_invalid:
+            state.game_ui = GameUI.SELECT_CARD
+            state.in_battle = False
+
         if not state.in_battle:
             ui_names = {1: "主界面", 2: "选卡界面", 3: "战斗界面"}
             label = ui_names.get(state.game_ui, "未知")
@@ -684,8 +700,10 @@ class PvZStateReader:
         if state.level_end_countdown > 0:
             lines.append(f"🏆通关倒计时: {state.level_end_countdown / 100:.1f}s")
 
-        if state.is_paused:
-            lines.append("⏸ 游戏已暂停")
+        # 不输出"游戏已暂停"信息。
+        # Agent 使用注入冻结主循环来暂停游戏，此时 game_paused 可能仍为 False；
+        # 若用户手动 Esc 暂停，game_paused 为 True，但模型不应该去按空格取消暂停
+        # （Agent 自己管理暂停/恢复），告诉模型只会误导它去操作暂停菜单。
 
         lines.append("")
 
